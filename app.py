@@ -5,7 +5,6 @@ import numpy as np
 from datetime import datetime, timedelta
 import plotly.graph_objects as go
 import requests
-import json
 
 # Page Configuration
 st.set_page_config(
@@ -45,7 +44,6 @@ st.markdown('<p class="main-header">📊 Intraday ORB + OI Scanner</p>', unsafe_
 # NSE API FUNCTIONS FOR OI DATA
 # ============================================
 def get_nse_headers():
-    """Headers required for NSE India API"""
     return {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         'Accept': 'application/json, text/plain, */*',
@@ -54,52 +52,35 @@ def get_nse_headers():
     }
 
 def fetch_oi_data_nse(symbol):
-    """
-    Fetch OI data from NSE India
-    Returns: dict with OI analysis
-    """
     try:
         session = requests.Session()
         headers = get_nse_headers()
+        session.get('https://www.nseindia.com/', headers=headers, timeout=5)
         
-        # First visit main page to get cookies
-        session.get('https://www.nseindia.com/', headers=headers, timeout=10)
-        
-        # Fetch OI data
         url = f"https://www.nseindia.com/api/option-chain-indices?symbol={symbol}" if symbol in ['NIFTY', 'BANKNIFTY', 'FINNIFTY'] else f"https://www.nseindia.com/api/option-chain-equities?symbol={symbol}"
         
-        response = session.get(url, headers=headers, timeout=10)
+        response = session.get(url, headers=headers, timeout=5)
         
         if response.status_code == 200:
             data = response.json()
             return parse_oi_data(data)
-        else:
-            return None
-            
-    except Exception as e:
+        return None
+    except:
         return None
 
 def parse_oi_data(data):
-    """Parse OI data from NSE response"""
     if not data or 'records' not in data:
         return None
     
     records = data['records']
     underlying_value = records.get('underlyingValue', 0)
-    
-    # Get all strike prices
     strikes = records.get('data', [])
     
     if not strikes:
         return None
     
-    # Calculate total OI for calls and puts
     total_ce_oi = 0
     total_pe_oi = 0
-    total_ce_volume = 0
-    total_pe_volume = 0
-    
-    # Find ATM strike
     atm_strike = None
     min_diff = float('inf')
     
@@ -109,42 +90,14 @@ def parse_oi_data(data):
         if diff < min_diff:
             min_diff = diff
             atm_strike = strike
-    
-    # Analyze ATM and nearby strikes
-    ce_oi_atm = 0
-    pe_oi_atm = 0
-    ce_oi_itm = 0
-    pe_oi_itm = 0
-    
-    for strike_data in strikes:
-        strike = strike_data.get('strikePrice', 0)
         
-        # CE data
         if 'CE' in strike_data and strike_data['CE']:
-            ce = strike_data['CE']
-            total_ce_oi += ce.get('openInterest', 0)
-            total_ce_volume += ce.get('totalTradedVolume', 0)
-            
-            if strike == atm_strike:
-                ce_oi_atm = ce.get('openInterest', 0)
-            elif strike < underlying_value:  # ITM CE
-                ce_oi_itm += ce.get('openInterest', 0)
-        
-        # PE data
+            total_ce_oi += strike_data['CE'].get('openInterest', 0)
         if 'PE' in strike_data and strike_data['PE']:
-            pe = strike_data['PE']
-            total_pe_oi += pe.get('openInterest', 0)
-            total_pe_volume += pe.get('totalTradedVolume', 0)
-            
-            if strike == atm_strike:
-                pe_oi_atm = pe.get('openInterest', 0)
-            elif strike > underlying_value:  # ITM PE
-                pe_oi_itm += pe.get('openInterest', 0)
+            total_pe_oi += strike_data['PE'].get('openInterest', 0)
     
-    # Calculate PCR (Put-Call Ratio)
     pcr = total_pe_oi / total_ce_oi if total_ce_oi > 0 else 0
     
-    # OI Interpretation
     if pcr > 1.2:
         oi_sentiment = "BULLISH (High PE OI - Support)"
         oi_signal = "LONG"
@@ -155,20 +108,14 @@ def parse_oi_data(data):
         oi_sentiment = "NEUTRAL"
         oi_signal = "NEUTRAL"
     
-    # Max Pain calculation (approximate)
-    max_pain_strike = atm_strike  # Simplified
-    
     return {
         'underlying': round(underlying_value, 2),
         'atm_strike': atm_strike,
         'total_ce_oi': total_ce_oi,
         'total_pe_oi': total_pe_oi,
         'pcr': round(pcr, 2),
-        'ce_volume': total_ce_volume,
-        'pe_volume': total_pe_volume,
         'oi_sentiment': oi_sentiment,
         'oi_signal': oi_signal,
-        'max_pain': max_pain_strike
     }
 
 # ============================================
@@ -237,10 +184,21 @@ def fetch_intraday_data(symbol, period="1d", interval="5m"):
         df = ticker.history(period=period, interval=interval)
         if df.empty:
             return None
+        
         df.reset_index(inplace=True)
+        # Handle different column names
         df.columns = [c[0] if isinstance(c, tuple) else c for c in df.columns]
+        
+        # Rename date column if needed
+        if 'Datetime' in df.columns:
+            df.rename(columns={'Datetime': 'Date'}, inplace=True)
+        elif 'Date' not in df.columns and len(df.columns) > 0:
+            # Use first column as date
+            first_col = df.columns[0]
+            df.rename(columns={first_col: 'Date'}, inplace=True)
+            
         return df
-    except:
+    except Exception as e:
         return None
 
 @st.cache_data(ttl=300)
@@ -250,8 +208,16 @@ def fetch_daily_data(symbol, period="20d"):
         df = ticker.history(period=period, interval="1d")
         if df.empty:
             return None
+        
         df.reset_index(inplace=True)
         df.columns = [c[0] if isinstance(c, tuple) else c for c in df.columns]
+        
+        if 'Datetime' in df.columns:
+            df.rename(columns={'Datetime': 'Date'}, inplace=True)
+        elif 'Date' not in df.columns and len(df.columns) > 0:
+            first_col = df.columns[0]
+            df.rename(columns={first_col: 'Date'}, inplace=True)
+            
         return df
     except:
         return None
@@ -263,9 +229,16 @@ def analyze_orb(df_intraday, symbol, orb_mins=15):
     if df_intraday is None or df_intraday.empty:
         return None
     
-    df_intraday['Date'] = pd.to_datetime(df_intraday['Date']).dt.date
-    today = datetime.now().date()
-    df_today = df_intraday[df_intraday['Date'] == today].copy()
+    # Ensure Date column exists
+    if 'Date' not in df_intraday.columns:
+        return None
+    
+    try:
+        df_intraday['Date'] = pd.to_datetime(df_intraday['Date'])
+        today = datetime.now().date()
+        df_today = df_intraday[df_intraday['Date'].dt.date == today].copy()
+    except:
+        return None
     
     if df_today.empty:
         return None
@@ -321,15 +294,11 @@ def analyze_orb(df_intraday, symbol, orb_mins=15):
 # COMBINED SIGNAL CALCULATION
 # ============================================
 def get_combined_signal(orb_signal, oi_signal, oi_weight):
-    """
-    Combine ORB and OI signals
-    """
     signal_scores = {"BUY": 1, "NEUTRAL": 0, "SELL": -1}
     
     orb_score = signal_scores.get(orb_signal, 0)
     oi_score = signal_scores.get(oi_signal, 0)
     
-    # Weighted average
     combined = (orb_score * (100 - oi_weight) + oi_score * oi_weight) / 100
     
     if combined > 0.3:
@@ -360,19 +329,16 @@ if refresh:
         progress_bar.progress(min(progress, 0.99))
         status_text.text(f"Analyzing {symbol}... ({i+1}/{total_stocks})")
         
-        # Fetch price data
         df_5m = fetch_intraday_data(symbol, period="1d", interval="5m")
         orb_result = analyze_orb(df_5m, symbol, orb_minutes)
         
         if orb_result and min_price <= orb_result['current_price'] <= max_price:
             
-            # Fetch OI data if enabled
             oi_data = None
             if enable_oi:
                 nse_symbol = symbol.replace('.NS', '')
                 oi_data = fetch_oi_data_nse(nse_symbol)
             
-            # Combine signals
             orb_signal = orb_result['signal']
             oi_signal = oi_data['oi_signal'] if oi_data else "NEUTRAL"
             
@@ -380,7 +346,6 @@ if refresh:
                 orb_signal, oi_signal, oi_weight
             )
             
-            # Final result
             result = {
                 **orb_result,
                 'combined_signal': combined_signal,
@@ -399,11 +364,11 @@ if refresh:
     # DISPLAY RESULTS
     # ============================================
     if not results:
-        st.warning("⚠️ No signals found. Market might be closed.")
+        st.warning("⚠️ No signals found. Market might be closed or no breakouts yet.")
+        st.info("💡 Tip: Indian market hours are 9:15 AM - 3:30 PM IST. ORB works best between 9:30-11:00 AM.")
     else:
         df_results = pd.DataFrame([{k: v for k, v in r.items() if k != 'oi_data'} for r in results])
         
-        # Sort by signal strength
         signal_order = {'STRONG BUY': 0, 'BUY': 1, 'NEUTRAL': 2, 'SELL': 3, 'STRONG SELL': 4}
         df_results['sort_key'] = df_results['combined_signal'].map(signal_order)
         df_results = df_results.sort_values(['sort_key', 'confidence'], ascending=[True, False])
@@ -429,10 +394,6 @@ if refresh:
         
         # Display each stock
         for idx, row in enumerate(results):
-            # Find matching df row
-            df_row = df_results[df_results['symbol'] == row['symbol']].iloc[0]
-            
-            # Signal styling
             sig = row['combined_signal']
             if 'STRONG BUY' in sig:
                 emoji, color_class = "🚀", "buy-signal"
@@ -449,7 +410,6 @@ if refresh:
                 
                 col1, col2, col3 = st.columns([2, 2, 2])
                 
-                # Column 1: ORB Data
                 with col1:
                     st.markdown(f"""
                     <div class="metric-card">
@@ -464,7 +424,6 @@ if refresh:
                     </div>
                     """, unsafe_allow_html=True)
                 
-                # Column 2: Trade Setup
                 with col2:
                     if row['entry_price']:
                         st.markdown(f"""
@@ -486,7 +445,6 @@ if refresh:
                         </div>
                         """, unsafe_allow_html=True)
                 
-                # Column 3: OI Data
                 with col3:
                     if row['oi_data']:
                         oi = row['oi_data']
@@ -503,8 +461,7 @@ if refresh:
                         PCR Ratio: <b>{oi['pcr']}</b><br>
                         ATM Strike: {oi['atm_strike']}<br>
                         CE OI: {oi['total_ce_oi']:,}<br>
-                        PE OI: {oi['total_pe_oi']:,}<br>
-                        Max Pain: {oi['max_pain']}
+                        PE OI: {oi['total_pe_oi']:,}
                         </div>
                         """, unsafe_allow_html=True)
                     else:
@@ -516,11 +473,9 @@ if refresh:
                         </div>
                         """, unsafe_allow_html=True)
                 
-                # Signal Logic Explanation
                 st.markdown("---")
                 st.markdown(f"**📊 Signal Logic:** ORB = {row['orb_signal']} + OI = {row['oi_signal']} → **{sig}** (Confidence: {row['confidence']}%)")
         
-        # Download
         st.markdown("---")
         csv = df_results.to_csv(index=False)
         st.download_button(
@@ -559,7 +514,7 @@ with st.expander("📚 OI Analysis Guide"):
     ### ⚠️ Important:
     - OI data **NSE India** se aata hai (real-time)
     - Sirf **F&O stocks** ke liye available hai
-    - **Max Pain** = Strike jahan sabse zyada loss hoga (market wahan attract hota hai)
+    - **Max Pain** = Strike jahan sabse zyada loss hoga
     """)
 
 # Footer
