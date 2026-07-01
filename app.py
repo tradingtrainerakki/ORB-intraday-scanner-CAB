@@ -10,7 +10,7 @@ warnings.filterwarnings('ignore')
 
 # Page Configuration
 st.set_page_config(
-    page_title="🎯 Ultimate Intraday Scanner + News",
+    page_title="🎯 Independent Sector Scanner",
     page_icon="🎯",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -69,16 +69,17 @@ st.markdown("""
         border-left: 5px solid #667eea;
         margin: 5px 0;
     }
-    .oi-buildup {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    .sector-card {
+        background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
         color: white;
         padding: 15px;
         border-radius: 10px;
         text-align: center;
+        margin: 5px 0;
     }
-    .buildup-bullish { background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%); }
-    .buildup-bearish { background: linear-gradient(135deg, #cb2d3e 0%, #ef473a 100%); }
-    .buildup-neutral { background: linear-gradient(135deg, #f7971e 0%, #ffd200 100%); color: #333; }
+    .sector-strong { background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%); }
+    .sector-weak { background: linear-gradient(135deg, #cb2d3e 0%, #ef473a 100%); }
+    .sector-neutral { background: linear-gradient(135deg, #f7971e 0%, #ffd200 100%); color: #333; }
     .news-positive { background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%); color: white; padding: 10px; border-radius: 10px; }
     .news-negative { background: linear-gradient(135deg, #cb2d3e 0%, #ef473a 100%); color: white; padding: 10px; border-radius: 10px; }
     .news-neutral { background: linear-gradient(135deg, #f7971e 0%, #ffd200 100%); color: #333; padding: 10px; border-radius: 10px; }
@@ -86,17 +87,90 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.markdown('<p class="main-header">🎯 Ultimate Intraday Scanner + News</p>', unsafe_allow_html=True)
-st.markdown('<p class="sub-header">70-80% Accuracy | OI Buildup | News Sentiment | Smart SL</p>', unsafe_allow_html=True)
+st.markdown('<p class="main-header">🎯 Independent Sector Scanner</p>', unsafe_allow_html=True)
+st.markdown('<p class="sub-header">Nifty Independent | Sector-Based | Stock-Specific Strength</p>', unsafe_allow_html=True)
 
 # ============================================
-# NEWS FETCHING FUNCTION
+# SECTOR DEFINITIONS & ETFS
+# ============================================
+SECTOR_ETFS = {
+    "IT": ["^CNXIT", "TCS.NS", "INFY.NS", "WIPRO.NS", "HCLTECH.NS", "TECHM.NS"],
+    "BANK": ["^NSEBANK", "HDFCBANK.NS", "ICICIBANK.NS", "KOTAKBANK.NS", "AXISBANK.NS", "SBIN.NS"],
+    "AUTO": ["^CNXAUTO", "MARUTI.NS", "TATAMOTORS.NS", "M&M.NS", "EICHERMOT.NS", "BAJAJ-AUTO.NS"],
+    "PHARMA": ["^CNXPHARMA", "SUNPHARMA.NS", "DRREDDY.NS", "CIPLA.NS", "DIVISLAB.NS", "APOLLOHOSP.NS"],
+    "FMCG": ["^CNXFMCG", "HINDUNILVR.NS", "ITC.NS", "NESTLEIND.NS", "BRITANNIA.NS", "TATACONSUM.NS"],
+    "METAL": ["^CNXMETAL", "TATASTEEL.NS", "JSWSTEEL.NS", "HINDALCO.NS", "COALINDIA.NS"],
+    "ENERGY": ["^CNXENERGY", "RELIANCE.NS", "ONGC.NS", "POWERGRID.NS", "NTPC.NS", "BPCL.NS"],
+    "INFRA": ["^CNXINFRA", "LT.NS", "ADANIENT.NS", "ADANIPORTS.NS", "ULTRACEMCO.NS"],
+}
+
+STOCK_TO_SECTOR = {}
+for sector, stocks in SECTOR_ETFS.items():
+    for stock in stocks[1:]:  # Skip index
+        STOCK_TO_SECTOR[stock] = sector
+
+# ============================================
+# FETCH SECTOR PERFORMANCE
+# ============================================
+@st.cache_data(ttl=300)
+def get_sector_performance():
+    """Get how each sector is performing today - INDEPENDENT of Nifty"""
+    sector_perf = {}
+    
+    for sector, etf_list in SECTOR_ETFS.items():
+        try:
+            etf = yf.Ticker(etf_list[0])  # Index/ETF
+            df = etf.history(period="2d", interval="5m")
+            if df.empty or len(df) < 2:
+                sector_perf[sector] = {"change": 0, "trend": "NEUTRAL"}
+                continue
+            
+            df.reset_index(inplace=True)
+            df.columns = [c[0] if isinstance(c, tuple) else c for c in df.columns]
+            
+            if 'Datetime' in df.columns:
+                df.rename(columns={'Datetime': 'Date'}, inplace=True)
+            
+            df['Date'] = pd.to_datetime(df['Date'])
+            today = datetime.now().date()
+            df_today = df[df['Date'].dt.date == today]
+            
+            if df_today.empty:
+                sector_perf[sector] = {"change": 0, "trend": "NEUTRAL"}
+                continue
+            
+            open_price = df_today['Open'].iloc[0]
+            current = df_today['Close'].iloc[-1]
+            change_pct = ((current - open_price) / open_price) * 100
+            
+            # Sector trend independent of Nifty
+            if change_pct > 1.5:
+                trend = "STRONG_UP"
+            elif change_pct > 0.5:
+                trend = "UP"
+            elif change_pct < -1.5:
+                trend = "STRONG_DOWN"
+            elif change_pct < -0.5:
+                trend = "DOWN"
+            else:
+                trend = "NEUTRAL"
+            
+            sector_perf[sector] = {
+                "change": round(change_pct, 2),
+                "trend": trend,
+                "open": open_price,
+                "current": current
+            }
+            
+        except:
+            sector_perf[sector] = {"change": 0, "trend": "NEUTRAL"}
+    
+    return sector_perf
+
+# ============================================
+# NEWS FETCHING
 # ============================================
 def fetch_stock_news(symbol):
-    """
-    Fetch recent news for a stock and analyze sentiment
-    Uses Yahoo Finance news as primary source
-    """
     try:
         ticker = yf.Ticker(symbol)
         news = ticker.news
@@ -104,7 +178,6 @@ def fetch_stock_news(symbol):
         if not news or len(news) == 0:
             return None
         
-        # Analyze sentiment based on keywords
         positive_keywords = ['profit', 'growth', 'rise', 'gain', 'bullish', 'buy', 'upgrade', 
                             'strong', 'beat', 'surge', 'rally', 'positive', 'outperform',
                             'record', 'high', 'up', 'increase', 'boost', 'good', 'excellent',
@@ -118,12 +191,10 @@ def fetch_stock_news(symbol):
         analyzed_news = []
         total_score = 0
         
-        for item in news[:5]:  # Last 5 news items
+        for item in news[:5]:
             title = item.get('title', '').lower()
             publisher = item.get('publisher', 'Unknown')
-            published_time = item.get('published', '')
             
-            # Calculate sentiment score
             pos_count = sum(1 for word in positive_keywords if word in title)
             neg_count = sum(1 for word in negative_keywords if word in title)
             
@@ -143,11 +214,9 @@ def fetch_stock_news(symbol):
                 'title': item.get('title', ''),
                 'publisher': publisher,
                 'sentiment': sentiment,
-                'score': score,
-                'time': published_time
+                'score': score
             })
         
-        # Overall sentiment
         if total_score >= 2:
             overall = "POSITIVE"
         elif total_score <= -2:
@@ -162,38 +231,11 @@ def fetch_stock_news(symbol):
             'articles': analyzed_news
         }
         
-    except Exception as e:
+    except:
         return None
 
-def get_news_impact(signal, news_sentiment):
-    """
-    Determine if news supports or contradicts the signal
-    """
-    if news_sentiment is None:
-        return "NO DATA", "neutral"
-    
-    overall = news_sentiment['overall_sentiment']
-    
-    if signal == "BUY":
-        if overall == "POSITIVE":
-            return "SUPPORTS", "positive"
-        elif overall == "NEGATIVE":
-            return "CONTRADICTS", "negative"
-        else:
-            return "NEUTRAL", "neutral"
-    
-    elif signal == "SELL":
-        if overall == "NEGATIVE":
-            return "SUPPORTS", "positive"
-        elif overall == "POSITIVE":
-            return "CONTRADICTS", "negative"
-        else:
-            return "NEUTRAL", "neutral"
-    
-    return "NEUTRAL", "neutral"
-
 # ============================================
-# NSE API FUNCTIONS - OI DATA + BUILDUP
+# NSE OI DATA
 # ============================================
 def get_nse_headers():
     return {
@@ -257,7 +299,6 @@ def parse_oi_data(data):
             total_pe_change += pe.get('changeinOpenInterest', 0)
     
     pcr_oi = total_pe_oi / total_ce_oi if total_ce_oi > 0 else 0
-    pcr_change = total_pe_change / total_ce_change if total_ce_change != 0 else 0
     
     if total_pe_change > 0 and total_ce_change < 0:
         oi_buildup = "BULLISH BUILDUP"
@@ -270,11 +311,11 @@ def parse_oi_data(data):
     else:
         oi_buildup = "NEUTRAL"
     
-    if pcr_oi > 1.3 and pcr_change > 1:
+    if pcr_oi > 1.3:
         oi_signal = "STRONG LONG"
     elif pcr_oi > 1.1:
         oi_signal = "LONG"
-    elif pcr_oi < 0.7 and pcr_change < 1:
+    elif pcr_oi < 0.7:
         oi_signal = "STRONG SHORT"
     elif pcr_oi < 0.9:
         oi_signal = "SHORT"
@@ -287,13 +328,12 @@ def parse_oi_data(data):
         'total_ce_oi': total_ce_oi,
         'total_pe_oi': total_pe_oi,
         'pcr_oi': round(pcr_oi, 2),
-        'pcr_change': round(pcr_change, 2),
         'oi_buildup': oi_buildup,
         'oi_signal': oi_signal,
     }
 
 # ============================================
-# SIDEBAR CONFIGURATION
+# SIDEBAR
 # ============================================
 st.sidebar.header("⚙️ Scanner Settings")
 
@@ -315,7 +355,6 @@ stock_options = {
         "INDUSINDBK.NS", "BANDHANBNK.NS", "FEDERALBNK.NS", "IDFCFIRSTB.NS", "PNB.NS",
         "BANKBARODA.NS", "CANBK.NS", "UNIONBANK.NS", "AUBANK.NS", "RBLBANK.NS"
     ],
-    "Indices (OI Available)": ["NIFTY", "BANKNIFTY"],
     "Custom": []
 }
 
@@ -337,23 +376,23 @@ accuracy_mode = st.sidebar.selectbox(
     "Select Mode",
     ["Conservative (80%+)", "Balanced (70-80%)", "Aggressive (60-70%)"]
 )
-
 min_accuracy = {"Conservative (80%+)": 80, "Balanced (70-80%)": 70, "Aggressive (60-70%)": 60}[accuracy_mode]
 
 # Filters
 st.sidebar.subheader("🔥 Advanced Filters")
-use_oi_buildup = st.sidebar.checkbox("✅ OI Buildup Analysis", value=True)
-use_multi_tf = st.sidebar.checkbox("✅ Multi-Timeframe Confirm", value=True)
-use_vwap = st.sidebar.checkbox("✅ VWAP + Volume Profile", value=True)
-use_atr_sl = st.sidebar.checkbox("✅ Smart ATR-based SL", value=True)
-use_price_action = st.sidebar.checkbox("✅ Price Action Patterns", value=True)
-use_news = st.sidebar.checkbox("📰 News Sentiment Analysis", value=True)
+use_sector = st.sidebar.checkbox("✅ Sector Strength Filter", value=True)
+use_oi = st.sidebar.checkbox("✅ OI Buildup Analysis", value=True)
+use_news = st.sidebar.checkbox("📰 News Sentiment", value=True)
+use_multi_tf = st.sidebar.checkbox("✅ Multi-Timeframe", value=True)
+use_vwap = st.sidebar.checkbox("✅ VWAP", value=True)
+use_atr_sl = st.sidebar.checkbox("✅ Smart ATR SL", value=True)
+use_pa = st.sidebar.checkbox("✅ Price Action", value=True)
 
-# Risk Management
+# Risk
 st.sidebar.subheader("Risk Management")
 risk_reward = st.sidebar.slider("Risk : Reward", 1.0, 4.0, 2.5, 0.5)
 
-# Filters
+# Price Filters
 st.sidebar.subheader("Price Filters")
 min_price = st.sidebar.number_input("Min Price (₹)", 50, 50000, 100)
 max_price = st.sidebar.number_input("Max Price (₹)", 50, 50000, 10000)
@@ -364,12 +403,13 @@ st.sidebar.markdown("---")
 st.sidebar.info(f"""
 **🎯 {accuracy_mode}**
 - Min Accuracy: {min_accuracy}%
+- Nifty Independent ✅
+- Sector Based ✅
 - Expected Win Rate: {min_accuracy}-{min_accuracy+10}%
-- Signals/Day: {'2-4' if min_accuracy==80 else '4-8' if min_accuracy==70 else '8-15'}
 """)
 
 # ============================================
-# DATA FETCHING - MULTI TIMEFRAME
+# DATA FETCHING
 # ============================================
 @st.cache_data(ttl=300)
 def fetch_data(symbol, period="5d", interval="5m"):
@@ -485,16 +525,15 @@ def detect_price_action(df):
         return "NEUTRAL", 0
 
 # ============================================
-# ULTIMATE ORB ANALYSIS
+# MAIN ORB ANALYSIS
 # ============================================
-def analyze_orb_ultimate(symbol, orb_mins=15, use_multi_tf=True, use_vwap=True, 
-                          use_atr=True, use_pa=True, use_oi=True):
+def analyze_orb_ultimate(symbol, sector_perf, orb_mins=15):
     df_5m = fetch_data(symbol, period="5d", interval="5m")
-    df_15m = fetch_data(symbol, period="10d", interval="15m") if use_multi_tf else None
+    df_15m = fetch_data(symbol, period="10d", interval="15m")
     df_daily = fetch_data(symbol, period="30d", interval="1d")
     
     if df_5m is None or df_5m.empty:
-        return None, "No 5m data available"
+        return None, "No 5m data"
     
     if 'Date' not in df_5m.columns:
         return None, "Date column missing"
@@ -504,13 +543,10 @@ def analyze_orb_ultimate(symbol, orb_mins=15, use_multi_tf=True, use_vwap=True,
         today = datetime.now().date()
         df_today = df_5m[df_5m['Date'].dt.date == today].copy()
     except:
-        return None, "Date parsing error"
+        return None, "Date error"
     
-    if df_today.empty:
-        return None, "No today's data (Market might be closed)"
-    
-    if len(df_today) < 3:
-        return None, "Not enough candles today"
+    if df_today.empty or len(df_today) < 3:
+        return None, "No today's data"
     
     df_today = df_today.sort_values('Date')
     candles_needed = max(1, orb_mins // 5)
@@ -524,9 +560,6 @@ def analyze_orb_ultimate(symbol, orb_mins=15, use_multi_tf=True, use_vwap=True,
     
     current_candle = df_today.iloc[-1]
     current_price = current_candle['Close']
-    current_high = current_candle['High']
-    current_low = current_candle['Low']
-    current_volume = current_candle['Volume']
     
     if current_price > orb_high:
         base_signal = "BUY"
@@ -539,41 +572,41 @@ def analyze_orb_ultimate(symbol, orb_mins=15, use_multi_tf=True, use_vwap=True,
     else:
         return None, "No ORB breakout"
     
+    # FILTERS
     filters_passed = 1
     total_filters = 1
     filter_details = []
-    filter_details.append(("✅ ORB Breakout", True, f"Price broke {base_signal} level"))
+    filter_details.append(("✅ ORB Breakout", True, f"Price broke {base_signal}"))
     
-    # Volume
+    # 1. VOLUME
     total_filters += 1
     try:
         avg_volume = df_today['Volume'].rolling(window=5).mean().iloc[-1]
-        volume_ratio = current_volume / avg_volume if avg_volume > 0 else 0
+        volume_ratio = current_candle['Volume'] / avg_volume if avg_volume > 0 else 0
         volume_pass = volume_ratio >= 1.3
         if volume_pass:
             filters_passed += 1
-        filter_details.append((f"{'✅' if volume_pass else '❌'} Volume Spike", volume_pass, f"{volume_ratio:.1f}x avg"))
+        filter_details.append((f"{'✅' if volume_pass else '❌'} Volume", volume_pass, f"{volume_ratio:.1f}x"))
     except:
-        filter_details.append(("❌ Volume Spike", False, "Error"))
+        filter_details.append(("❌ Volume", False, "Error"))
     
-    # VWAP
-    if use_vwap:
-        total_filters += 1
-        vwap = calculate_vwap(df_today)
-        if vwap:
-            if base_signal == "BUY" and current_price > vwap:
-                filters_passed += 1
-                vwap_pass = True
-            elif base_signal == "SELL" and current_price < vwap:
-                filters_passed += 1
-                vwap_pass = True
-            else:
-                vwap_pass = False
-            filter_details.append((f"{'✅' if vwap_pass else '❌'} VWAP", vwap_pass, f"₹{vwap:.2f}"))
+    # 2. VWAP
+    total_filters += 1
+    vwap = calculate_vwap(df_today)
+    if vwap:
+        if base_signal == "BUY" and current_price > vwap:
+            filters_passed += 1
+            vwap_pass = True
+        elif base_signal == "SELL" and current_price < vwap:
+            filters_passed += 1
+            vwap_pass = True
         else:
-            filter_details.append(("❌ VWAP", False, "Calc error"))
+            vwap_pass = False
+        filter_details.append((f"{'✅' if vwap_pass else '❌'} VWAP", vwap_pass, f"₹{vwap:.2f}"))
+    else:
+        filter_details.append(("❌ VWAP", False, "Error"))
     
-    # RSI
+    # 3. RSI
     total_filters += 1
     rsi = calculate_rsi(df_today)
     if base_signal == "BUY" and rsi < 75:
@@ -584,10 +617,10 @@ def analyze_orb_ultimate(symbol, orb_mins=15, use_multi_tf=True, use_vwap=True,
         rsi_pass = True
     else:
         rsi_pass = False
-    filter_details.append((f"{'✅' if rsi_pass else '❌'} RSI ({rsi:.1f})", rsi_pass, f"RSI: {rsi:.1f}"))
+    filter_details.append((f"{'✅' if rsi_pass else '❌'} RSI", rsi_pass, f"{rsi:.1f}"))
     
-    # Multi-TF
-    if use_multi_tf and df_15m is not None:
+    # 4. MULTI-TIMEFRAME
+    if df_15m is not None:
         total_filters += 1
         try:
             df_15m['Date'] = pd.to_datetime(df_15m['Date'])
@@ -603,26 +636,23 @@ def analyze_orb_ultimate(symbol, orb_mins=15, use_multi_tf=True, use_vwap=True,
                     tf_pass = True
                 else:
                     tf_pass = False
-                filter_details.append((f"{'✅' if tf_pass else '❌'} 15m Confirm", tf_pass, f"H:₹{tf_high:.0f} L:₹{tf_low:.0f}"))
+                filter_details.append((f"{'✅' if tf_pass else '❌'} 15m TF", tf_pass, f"H:₹{tf_high:.0f}"))
             else:
-                filter_details.append(("❌ 15m Confirm", False, "No data"))
+                filter_details.append(("❌ 15m TF", False, "No data"))
         except:
-            filter_details.append(("❌ 15m Confirm", False, "Error"))
+            filter_details.append(("❌ 15m TF", False, "Error"))
     
-    # Price Action
-    if use_pa:
-        total_filters += 1
-        pa_signal, pa_strength = detect_price_action(df_today)
-        if (base_signal == "BUY" and pa_signal == "BULLISH") or (base_signal == "SELL" and pa_signal == "BEARISH"):
-            filters_passed += 1
-            pa_pass = True
-        elif pa_signal == "NEUTRAL":
-            pa_pass = False
-        else:
-            pa_pass = False
-        filter_details.append((f"{'✅' if pa_pass else '❌'} Price Action", pa_pass, f"{pa_signal} ({pa_strength})"))
+    # 5. PRICE ACTION
+    total_filters += 1
+    pa_signal, pa_strength = detect_price_action(df_today)
+    if (base_signal == "BUY" and pa_signal == "BULLISH") or (base_signal == "SELL" and pa_signal == "BEARISH"):
+        filters_passed += 1
+        pa_pass = True
+    else:
+        pa_pass = False
+    filter_details.append((f"{'✅' if pa_pass else '❌'} Price Action", pa_pass, f"{pa_signal}"))
     
-    # EMA
+    # 6. EMA
     total_filters += 1
     ema20 = calculate_ema(df_5m, 20)
     if ema20:
@@ -634,11 +664,11 @@ def analyze_orb_ultimate(symbol, orb_mins=15, use_multi_tf=True, use_vwap=True,
             ema_pass = True
         else:
             ema_pass = False
-        filter_details.append((f"{'✅' if ema_pass else '❌'} EMA20 Trend", ema_pass, f"EMA: ₹{ema20:.2f}"))
+        filter_details.append((f"{'✅' if ema_pass else '❌'} EMA20", ema_pass, f"₹{ema20:.2f}"))
     else:
-        filter_details.append(("❌ EMA20 Trend", False, "Calc error"))
+        filter_details.append(("❌ EMA20", False, "Error"))
     
-    # Prev Day
+    # 7. PREV DAY
     if df_daily is not None and len(df_daily) >= 2:
         total_filters += 1
         try:
@@ -649,29 +679,58 @@ def analyze_orb_ultimate(symbol, orb_mins=15, use_multi_tf=True, use_vwap=True,
             if base_signal == "BUY" and current_price > prev_high:
                 filters_passed += 1
                 prev_pass = True
-                prev_detail = f"Above prev high ₹{prev_high:.2f}"
+                prev_detail = f"Above ₹{prev_high:.2f}"
             elif base_signal == "SELL" and current_price < prev_low:
                 filters_passed += 1
                 prev_pass = True
-                prev_detail = f"Below prev low ₹{prev_low:.2f}"
+                prev_detail = f"Below ₹{prev_low:.2f}"
             else:
                 prev_pass = False
-                prev_detail = f"Prev H:₹{prev_high:.2f} L:₹{prev_low:.2f}"
+                prev_detail = f"H:₹{prev_high:.0f} L:₹{prev_low:.0f}"
             filter_details.append((f"{'✅' if prev_pass else '❌'} Prev Day", prev_pass, prev_detail))
         except:
             filter_details.append(("❌ Prev Day", False, "Error"))
     
+    # 8. SECTOR STRENGTH (NEW - NIFTY INDEPENDENT)
+    sector = STOCK_TO_SECTOR.get(symbol, None)
+    if sector and sector_perf and sector in sector_perf:
+        total_filters += 1
+        sector_data = sector_perf[sector]
+        sector_trend = sector_data['trend']
+        sector_change = sector_data['change']
+        
+        if base_signal == "BUY":
+            if sector_trend in ["STRONG_UP", "UP"]:
+                filters_passed += 1
+                sector_pass = True
+            elif sector_trend == "NEUTRAL":
+                sector_pass = False
+            else:
+                sector_pass = False
+        else:  # SELL
+            if sector_trend in ["STRONG_DOWN", "DOWN"]:
+                filters_passed += 1
+                sector_pass = True
+            elif sector_trend == "NEUTRAL":
+                sector_pass = False
+            else:
+                sector_pass = False
+        
+        filter_details.append((f"{'✅' if sector_pass else '❌'} Sector ({sector})", sector_pass, f"{sector_change:+.2f}%"))
+    else:
+        filter_details.append(("➖ Sector", False, "N/A"))
+    
     accuracy = (filters_passed / total_filters) * 100 if total_filters > 0 else 0
     
-    if use_atr:
-        atr = calculate_atr(df_today)
-        if atr > 0:
-            if base_signal == "BUY":
-                atr_sl = entry_price - (1.5 * atr)
-                stop_loss = max(stop_loss, atr_sl)
-            else:
-                atr_sl = entry_price + (1.5 * atr)
-                stop_loss = min(stop_loss, atr_sl)
+    # ATR SL
+    atr = calculate_atr(df_today)
+    if atr > 0:
+        if base_signal == "BUY":
+            atr_sl = entry_price - (1.5 * atr)
+            stop_loss = max(stop_loss, atr_sl)
+        else:
+            atr_sl = entry_price + (1.5 * atr)
+            stop_loss = min(stop_loss, atr_sl)
     
     risk = abs(entry_price - stop_loss)
     target = entry_price + (risk * risk_reward) if base_signal == "BUY" else entry_price - (risk * risk_reward)
@@ -691,19 +750,20 @@ def analyze_orb_ultimate(symbol, orb_mins=15, use_multi_tf=True, use_vwap=True,
         'filters_passed': filters_passed,
         'total_filters': total_filters,
         'filter_details': filter_details,
+        'sector': sector,
+        'sector_change': sector_perf.get(sector, {}).get('change', 0) if sector_perf else 0,
         'day_high': round(df_today['High'].max(), 2),
         'day_low': round(df_today['Low'].min(), 2),
         'rsi': round(rsi, 1),
         'vwap': round(vwap, 2) if vwap else None,
-        'atr': round(atr, 2) if use_atr else None,
+        'atr': round(atr, 2),
         'ema20': round(ema20, 2) if ema20 else None,
-        'volume_ratio': round(volume_ratio, 2) if 'volume_ratio' in locals() else 0,
     }, None
 
 # ============================================
-# COMBINED SIGNAL WITH OI + NEWS
+# COMBINED SIGNAL
 # ============================================
-def get_final_signal(orb_signal, accuracy, oi_data, news_data, oi_weight):
+def get_final_signal(orb_signal, accuracy, oi_data, news_data):
     signal_scores = {"BUY": 1, "SELL": -1}
     orb_score = signal_scores.get(orb_signal, 0)
     
@@ -726,34 +786,61 @@ def get_final_signal(orb_signal, accuracy, oi_data, news_data, oi_weight):
     
     # News impact
     news_impact = "NO DATA"
-    news_class = "neutral"
     if news_data:
-        news_impact, news_class = get_news_impact(orb_signal, news_data)
+        overall = news_data['overall_sentiment']
+        if orb_signal == "BUY":
+            news_impact = "SUPPORTS" if overall == "POSITIVE" else ("CONTRADICTS" if overall == "NEGATIVE" else "NEUTRAL")
+        else:
+            news_impact = "SUPPORTS" if overall == "NEGATIVE" else ("CONTRADICTS" if overall == "POSITIVE" else "NEUTRAL")
+        
         if news_impact == "SUPPORTS":
-            orb_score *= 1.2  # Boost signal
+            orb_score *= 1.2
         elif news_impact == "CONTRADICTS":
-            orb_score *= 0.5  # Reduce signal strength
+            orb_score *= 0.5
     
-    combined = (orb_score * (100 - oi_weight) + oi_score * oi_weight) / 100
+    combined = (orb_score * 0.7 + oi_score * 0.3)
     
     if accuracy >= 85:
         if combined > 0.5:
-            return "🚀 STRONG BUY", combined, oi_signal, oi_buildup, news_impact, news_class
+            return "🚀 STRONG BUY", combined, oi_signal, oi_buildup, news_impact
         elif combined < -0.5:
-            return "🔻 STRONG SELL", combined, oi_signal, oi_buildup, news_impact, news_class
+            return "🔻 STRONG SELL", combined, oi_signal, oi_buildup, news_impact
     elif accuracy >= 70:
         if combined > 0:
-            return "🟢 BUY", combined, oi_signal, oi_buildup, news_impact, news_class
+            return "🟢 BUY", combined, oi_signal, oi_buildup, news_impact
         elif combined < 0:
-            return "🔴 SELL", combined, oi_signal, oi_buildup, news_impact, news_class
+            return "🔴 SELL", combined, oi_signal, oi_buildup, news_impact
     
-    return "🟡 NEUTRAL", combined, oi_signal, oi_buildup, news_impact, news_class
+    return "🟡 NEUTRAL", combined, oi_signal, oi_buildup, news_impact
 
 # ============================================
-# MAIN SCANNING LOGIC
+# MAIN SCANNING
 # ============================================
 if refresh:
-    st.subheader("🔍 Scanning with Ultimate Accuracy + News...")
+    st.subheader("🔍 Scanning (Nifty Independent)...")
+    
+    # Get sector performance FIRST
+    sector_perf = get_sector_performance() if use_sector else {}
+    
+    # Display sector overview
+    if sector_perf:
+        st.markdown("### 📊 Sector Performance Today")
+        sector_cols = st.columns(4)
+        col_idx = 0
+        for sector, data in sector_perf.items():
+            trend = data['trend']
+            change = data['change']
+            
+            if trend in ["STRONG_UP", "UP"]:
+                sec_class = "sector-strong"
+            elif trend in ["STRONG_DOWN", "DOWN"]:
+                sec_class = "sector-weak"
+            else:
+                sec_class = "sector-neutral"
+            
+            with sector_cols[col_idx % 4]:
+                st.markdown(f'<div class="sector-card {sec_class}"><b>{sector}</b><br>{change:+.2f}%<br>{trend}</div>', unsafe_allow_html=True)
+            col_idx += 1
     
     progress_bar = st.progress(0)
     status_text = st.empty()
@@ -766,35 +853,25 @@ if refresh:
         progress_bar.progress(min(progress, 0.99))
         status_text.text(f"Analyzing {symbol}... ({i+1}/{total_stocks})")
         
-        orb_result, error_msg = analyze_orb_ultimate(
-            symbol, orb_minutes,
-            use_multi_tf=use_multi_tf,
-            use_vwap=use_vwap,
-            use_atr=use_atr_sl,
-            use_pa=use_price_action,
-            use_oi=use_oi_buildup
-        )
+        orb_result, error_msg = analyze_orb_ultimate(symbol, sector_perf, orb_minutes)
         
         if orb_result and min_price <= orb_result['current_price'] <= max_price:
             
             if orb_result['accuracy'] >= min_accuracy:
                 
-                # Fetch OI data
                 oi_data = None
-                if use_oi_buildup:
+                if use_oi:
                     nse_symbol = symbol.replace('.NS', '')
                     oi_data = fetch_oi_data_nse(nse_symbol)
                 
-                # Fetch News
                 news_data = None
                 if use_news:
                     news_data = fetch_stock_news(symbol)
                 
-                final_signal, confidence, oi_signal, oi_buildup, news_impact, news_class = get_final_signal(
-                    orb_result['signal'], orb_result['accuracy'], oi_data, news_data, 30
+                final_signal, confidence, oi_signal, oi_buildup, news_impact = get_final_signal(
+                    orb_result['signal'], orb_result['accuracy'], oi_data, news_data
                 )
                 
-                # Skip if news contradicts strongly
                 if news_impact == "CONTRADICTS" and use_news:
                     continue
                 
@@ -806,20 +883,17 @@ if refresh:
                         'oi_signal': oi_signal,
                         'oi_buildup': oi_buildup,
                         'news_impact': news_impact,
-                        'news_class': news_class,
-                        'news_data': news_data,
-                        'oi_data': oi_data
+                        'oi_data': oi_data,
+                        'news_data': news_data
                     }
                     results.append(result)
     
     progress_bar.empty()
     status_text.empty()
     
-    # ============================================
-    # DISPLAY RESULTS
-    # ============================================
+    # DISPLAY
     if not results:
-        st.warning(f"⚠️ No signals found. Try 'Balanced' mode or check market hours.")
+        st.warning(f"⚠️ No {min_accuracy}% signals found.")
         st.info("💡 Market hours: 9:15 AM - 3:30 PM IST")
     else:
         strong_buy = len([r for r in results if "STRONG BUY" in r['final_signal']])
@@ -838,7 +912,6 @@ if refresh:
             st.markdown(f'<div class="metric-card"><h3>🔻 STRONG SELL</h3><h1>{strong_sell}</h1></div>', unsafe_allow_html=True)
         
         st.markdown("---")
-        
         results = sorted(results, key=lambda x: x['accuracy'], reverse=True)
         
         for row in results:
@@ -858,51 +931,38 @@ if refresh:
             
             if acc >= 85:
                 acc_class = "acc-90"
-                acc_text = f"🎯 {acc}% ACCURACY"
             elif acc >= 75:
                 acc_class = "acc-80"
-                acc_text = f"🎯 {acc}% ACCURACY"
             else:
                 acc_class = "acc-70"
-                acc_text = f"🎯 {acc}% ACCURACY"
             
-            with st.expander(f"{sig} **{row['symbol']}** | ₹{row['current_price']} | {acc_text}"):
+            with st.expander(f"{sig} **{row['symbol']}** | ₹{row['current_price']} | {acc}%"):
                 
-                st.markdown(f'<div class="signal-card {card_class}"><h2>{sig}</h2><p>{row["symbol"]} @ ₹{row["current_price"]}</p></div>', unsafe_allow_html=True)
-                st.markdown(f'<div class="accuracy-badge {acc_class}">{acc_text} ({row["filters_passed"]}/{row["total_filters"]} filters)</div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="signal-card {card_class}"><h2>{sig}</h2></div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="accuracy-badge {acc_class}">🎯 {acc}% ({row["filters_passed"]}/{row["total_filters"]})</div>', unsafe_allow_html=True)
                 
-                # NEWS SECTION
+                # Sector info
+                if row['sector']:
+                    st.markdown(f"""
+                    <div class="filter-box">
+                    <b>🏭 Sector: {row['sector']}</b> | Change: {row['sector_change']:+.2f}%
+                    </div>
+                    """, unsafe_allow_html=True)
+                
+                # News
                 if row['news_data']:
                     news = row['news_data']
                     news_class = "news-positive" if news['overall_sentiment'] == "POSITIVE" else ("news-negative" if news['overall_sentiment'] == "NEGATIVE" else "news-neutral")
-                    
-                    st.markdown("---")
-                    st.markdown(f"""
-                    <div class="{news_class}">
-                        <h3>📰 News Sentiment: {news['overall_sentiment']}</h3>
-                        <p>Impact on Signal: <b>{row['news_impact']}</b></p>
-                        <p>Score: {news['total_score']:+d} (from {news['news_count']} articles)</p>
-                    </div>
-                    """, unsafe_allow_html=True)
-                    
-                    with st.expander("📰 View News Articles"):
-                        for article in news['articles']:
-                            sentiment_color = "green" if article['sentiment'] == "POSITIVE" else ("red" if article['sentiment'] == "NEGATIVE" else "gray")
-                            st.markdown(f"""
-                            <div class="news-item">
-                                <p><b>{article['title']}</b></p>
-                                <p><span style="color:{sentiment_color}; font-weight:bold;">{article['sentiment']}</span> | {article['publisher']}</p>
-                            </div>
-                            """, unsafe_allow_html=True)
+                    st.markdown(f'<div class="{news_class}"><b>📰 News: {news["overall_sentiment"]}</b> | Impact: {row["news_impact"]}</div>', unsafe_allow_html=True)
                 
                 col1, col2, col3 = st.columns(3)
                 
                 with col1:
                     st.markdown(f"""
                     <div class="filter-box">
-                    <b>📈 Entry Setup</b><br>
+                    <b>📈 Trade</b><br>
                     Entry: <b>₹{row['entry_price']}</b><br>
-                    Smart SL: <span style="color:red">₹{row['stop_loss']}</span><br>
+                    SL: <span style="color:red">₹{row['stop_loss']}</span><br>
                     Target: <span style="color:green">₹{row['target']}</span><br>
                     Risk: ₹{row['risk']} ({row['risk_percent']}%)<br>
                     R:R = 1:{risk_reward}
@@ -912,39 +972,28 @@ if refresh:
                 with col2:
                     st.markdown(f"""
                     <div class="filter-box">
-                    <b>📊 Technicals</b><br>
+                    <b>📊 Tech</b><br>
                     RSI: {row['rsi']}<br>
                     VWAP: ₹{row['vwap'] if row['vwap'] else 'N/A'}<br>
-                    ATR: ₹{row['atr'] if row['atr'] else 'N/A'}<br>
-                    EMA20: ₹{row['ema20'] if row['ema20'] else 'N/A'}<br>
-                    Volume: {row['volume_ratio']}x
+                    ATR: ₹{row['atr']}<br>
+                    EMA20: ₹{row['ema20'] if row['ema20'] else 'N/A'}
                     </div>
                     """, unsafe_allow_html=True)
                 
                 with col3:
                     if row['oi_data']:
                         oi = row['oi_data']
-                        buildup_class = "buildup-bullish" if "BULLISH" in row['oi_buildup'] else ("buildup-bearish" if "BEARISH" in row['oi_buildup'] else "buildup-neutral")
-                        
                         st.markdown(f"""
-                        <div class="oi-buildup {buildup_class}">
-                        <b>🔥 OI Buildup</b><br>
-                        <h3>{row['oi_buildup']}</h3>
-                        <p>PCR: {oi['pcr_oi']}</p>
-                        <p>OI Signal: {row['oi_signal']}</p>
-                        </div>
-                        """, unsafe_allow_html=True)
-                    else:
-                        st.markdown("""
                         <div class="filter-box">
-                        <b>🔥 OI Data</b><br>
-                        Not available for this stock
+                        <b>🔥 OI</b><br>
+                        {row['oi_buildup']}<br>
+                        PCR: {oi['pcr_oi']}<br>
+                        Signal: {row['oi_signal']}
                         </div>
                         """, unsafe_allow_html=True)
                 
                 st.markdown("---")
-                st.markdown("**📋 Filter Checklist:**")
-                
+                st.markdown("**📋 Filters:**")
                 cols = st.columns(4)
                 for i, (filter_name, passed, detail) in enumerate(row['filter_details']):
                     with cols[i % 4]:
@@ -957,48 +1006,47 @@ if refresh:
         st.download_button(
             label="📥 Download Signals",
             data=csv,
-            file_name=f"scanner_news_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+            file_name=f"sector_scanner_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
             mime="text/csv"
         )
 
 # ============================================
 # EDUCATION
 # ============================================
-with st.expander("📚 How News Affects Trading"):
+with st.expander("📚 Why Nifty Independent?"):
     st.markdown("""
-    ### 📰 News Sentiment Kaise Kaam Karega
+    ### 🎯 Nifty Independent Kyun?
     
-    | News Type | Signal | Action |
-    |-----------|--------|--------|
-    | **POSITIVE News** + BUY Signal | ✅ STRONG BUY | Trade with confidence |
-    | **NEGATIVE News** + BUY Signal | ⚠️ WEAK BUY | Avoid or small quantity |
-    | **POSITIVE News** + SELL Signal | ⚠️ WEAK SELL | Avoid or small quantity |
-    | **NEGATIVE News** + SELL Signal | ✅ STRONG SELL | Trade with confidence |
-    
-    ### 🚫 News Contradicts Signal?
-    
-    Scanner **automatically skip** karega agar:
-    - BUY signal + Negative news = ❌ Skip
-    - SELL signal + Positive news = ❌ Skip
-    
-    ### 💡 Examples
-    
+    **Example:**
     ```
-    Scanner: BUY RELIANCE @ ₹2450
-    News: "Reliance announces record profit"
-    Result: 🚀 STRONG BUY → Trade!
+    Date: 15 Jan 2024
     
-    Scanner: BUY WIPRO @ ₹420
-    News: "WIPRO faces US lawsuit"
-    Result: ❌ SKIPPED → Avoid!
+    Nifty: +0.5% (Bullish)
+    IT Sector: -2.5% (Bearish)
+    INFY: -3% (Strong Sell Signal)
+    
+    Result: INFY sell kiya → Profit ✅
+    Agar Nifty dekhke buy kiya → Loss ❌
     ```
     
-    ### ⚠️ Important
+    **Sector Rotation:**
+    - Nifty UP + IT DOWN = IT stocks avoid
+    - Nifty DOWN + Pharma UP = Pharma buy
     
-    - News **Yahoo Finance** se aata hai
-    - **Real-time nahi** — thoda delayed ho sakta hai
-    - **Headline analysis** hai — deep analysis nahi
-    - Khud bhi **news verify** karein before trading
+    **Stock Specific:**
+    - Company news dominates
+    - Sector momentum matters
+    - Nifty just background noise
+    
+    ### 🏭 Sector Strength Filter
+    
+    | Sector Trend | BUY Signal | SELL Signal |
+    |-------------|-----------|-------------|
+    | STRONG_UP | ✅ Pass | ❌ Fail |
+    | UP | ✅ Pass | ❌ Fail |
+    | NEUTRAL | ❌ Fail | ❌ Fail |
+    | DOWN | ❌ Fail | ✅ Pass |
+    | STRONG_DOWN | ❌ Fail | ✅ Pass |
     """)
 
 # Footer
@@ -1006,7 +1054,6 @@ st.markdown("---")
 st.markdown("""
 <div style="text-align: center; color: gray; font-size: 12px;">
 <b>⚠️ Disclaimer:</b> Educational purposes only. Not financial advice. 
-<br>Data from Yahoo Finance (delayed) & NSE India. Trade at your own risk.
-<br><b>🎯 Target: 70-80% accuracy with News + OI + Technical filters</b>
+<br><b>🎯 Nifty Independent | Sector Based | Stock-Specific Analysis</b>
 </div>
 """, unsafe_allow_html=True)
