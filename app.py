@@ -9,8 +9,16 @@ import requests
 import json
 import os
 import hashlib
+import tempfile
 import warnings
 warnings.filterwarnings('ignore')
+
+# ============================================================
+# STREAMLIT CLOUD COMPATIBLE PATHS
+# ============================================================
+# Use temp directory for persistence (works on Streamlit Cloud)
+TEMP_DIR = tempfile.gettempdir()
+DATA_FILE = os.path.join(TEMP_DIR, "scanner_data.json")
 
 # ============================================================
 # PASSWORD PROTECTION
@@ -33,7 +41,6 @@ if 'username' not in st.session_state:
 
 # Login function
 def login(username, password):
-    # You can change these credentials
     valid_username = DEFAULT_USERNAME
     valid_password_hash = hash_password(DEFAULT_PASSWORD)
     
@@ -47,13 +54,10 @@ def login(username, password):
 def logout():
     st.session_state.authenticated = False
     st.session_state.username = ""
-    # Don't clear scan data on logout - keep it persistent
 
 # ============================================================
 # DATA PERSISTENCE - SAVE/LOAD SCAN RESULTS
 # ============================================================
-
-DATA_FILE = "scanner_data.json"
 
 # Initialize session state for data persistence
 if 'saved_results' not in st.session_state:
@@ -72,31 +76,30 @@ if 'saved_results' not in st.session_state:
                 st.session_state.saved_timestamp = data.get('timestamp')
                 st.session_state.saved_stock_list = data.get('stock_list')
                 st.session_state.saved_settings = data.get('settings')
-        except:
-            pass
+        except Exception as e:
+            st.session_state.load_error = str(e)
 
 def save_scan_data(results, sector_perf, stock_list, settings):
-    """Save scan results to file for persistence"""
-    # Convert results to serializable format
-    serializable_results = []
-    for r in results:
-        sr = {k: v for k, v in r.items() if k not in ['oi_data', 'news_data', 'filter_details']}
-        # Add back filter_details as plain list
-        if 'filter_details' in r:
-            sr['filter_details'] = [[name, passed, detail] for name, passed, detail in r['filter_details']]
-        serializable_results.append(sr)
-    
-    data = {
-        'results': serializable_results,
-        'sector_perf': sector_perf,
-        'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-        'stock_list': stock_list,
-        'settings': settings
-    }
-    
+    """Save scan results to temp file for persistence"""
     try:
+        serializable_results = []
+        for r in results:
+            sr = {k: v for k, v in r.items() if k not in ['oi_data', 'news_data', 'filter_details']}
+            if 'filter_details' in r:
+                sr['filter_details'] = [[name, passed, detail] for name, passed, detail in r['filter_details']]
+            serializable_results.append(sr)
+        
+        data = {
+            'results': serializable_results,
+            'sector_perf': sector_perf,
+            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'stock_list': stock_list,
+            'settings': settings
+        }
+        
         with open(DATA_FILE, 'w') as f:
             json.dump(data, f, default=str)
+        
         st.session_state.saved_results = serializable_results
         st.session_state.saved_sector_perf = sector_perf
         st.session_state.saved_timestamp = data['timestamp']
@@ -127,7 +130,10 @@ def clear_saved_data():
     st.session_state.saved_stock_list = None
     st.session_state.saved_settings = None
     if os.path.exists(DATA_FILE):
-        os.remove(DATA_FILE)
+        try:
+            os.remove(DATA_FILE)
+        except:
+            pass
 
 # ============================================================
 # LOGIN PAGE
@@ -136,7 +142,6 @@ def clear_saved_data():
 if not st.session_state.authenticated:
     st.set_page_config(page_title="🔒 Scanner Login", page_icon="🔒", layout="centered")
     
-    # Center the login form
     col1, col2, col3 = st.columns([1, 2, 1])
     
     with col2:
@@ -262,14 +267,6 @@ st.markdown("""
     .news-negative { background: linear-gradient(135deg, #cb2d3e 0%, #ef473a 100%); color: white; padding: 10px; border-radius: 10px; }
     .news-neutral { background: linear-gradient(135deg, #f7971e 0%, #ffd200 100%); color: #333; padding: 10px; border-radius: 10px; }
     .news-item { padding: 8px; margin: 5px 0; border-radius: 8px; background: #f0f2f6; border-left: 4px solid #667eea; }
-    .saved-badge {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        padding: 10px 20px;
-        border-radius: 25px;
-        font-weight: bold;
-        display: inline-block;
-    }
     .persistence-info {
         background: #e8f4f8;
         border-left: 4px solid #1f77b4;
@@ -1331,3 +1328,4 @@ with open('/mnt/agents/output/app.py', 'w', encoding='utf-8') as f:
 print("✅ File saved successfully!")
 print(f"📁 Location: /mnt/agents/output/app.py")
 print(f"📊 Size: {len(code)} characters")
+print(f"🌐 Cloud Compatible: YES (uses temp directory)")
