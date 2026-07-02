@@ -1,20 +1,198 @@
-import streamlit as st
+
+code = '''import streamlit as st
 import yfinance as yf
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
 import plotly.graph_objects as go
 import requests
+import json
+import os
+import hashlib
 import warnings
 warnings.filterwarnings('ignore')
 
-# Page Configuration
+# ============================================================
+# PASSWORD PROTECTION
+# ============================================================
+
+# Default credentials (change these!)
+DEFAULT_USERNAME = "Akki"
+DEFAULT_PASSWORD = "Ca@1809"
+
+# Hash password for security
+def hash_password(password):
+    return hashlib.sha256(password.encode()).hexdigest()
+
+# Initialize session state for auth
+if 'authenticated' not in st.session_state:
+    st.session_state.authenticated = False
+
+if 'username' not in st.session_state:
+    st.session_state.username = ""
+
+# Login function
+def login(username, password):
+    # You can change these credentials
+    valid_username = DEFAULT_USERNAME
+    valid_password_hash = hash_password(DEFAULT_PASSWORD)
+    
+    if username == valid_username and hash_password(password) == valid_password_hash:
+        st.session_state.authenticated = True
+        st.session_state.username = username
+        return True
+    return False
+
+# Logout function
+def logout():
+    st.session_state.authenticated = False
+    st.session_state.username = ""
+    # Don't clear scan data on logout - keep it persistent
+
+# ============================================================
+# DATA PERSISTENCE - SAVE/LOAD SCAN RESULTS
+# ============================================================
+
+DATA_FILE = "scanner_data.json"
+
+# Initialize session state for data persistence
+if 'saved_results' not in st.session_state:
+    st.session_state.saved_results = None
+    st.session_state.saved_sector_perf = None
+    st.session_state.saved_timestamp = None
+    st.session_state.saved_stock_list = None
+    st.session_state.saved_settings = None
+    # Try to load from file
+    if os.path.exists(DATA_FILE):
+        try:
+            with open(DATA_FILE, 'r') as f:
+                data = json.load(f)
+                st.session_state.saved_results = data.get('results')
+                st.session_state.saved_sector_perf = data.get('sector_perf')
+                st.session_state.saved_timestamp = data.get('timestamp')
+                st.session_state.saved_stock_list = data.get('stock_list')
+                st.session_state.saved_settings = data.get('settings')
+        except:
+            pass
+
+def save_scan_data(results, sector_perf, stock_list, settings):
+    """Save scan results to file for persistence"""
+    # Convert results to serializable format
+    serializable_results = []
+    for r in results:
+        sr = {k: v for k, v in r.items() if k not in ['oi_data', 'news_data', 'filter_details']}
+        # Add back filter_details as plain list
+        if 'filter_details' in r:
+            sr['filter_details'] = [[name, passed, detail] for name, passed, detail in r['filter_details']]
+        serializable_results.append(sr)
+    
+    data = {
+        'results': serializable_results,
+        'sector_perf': sector_perf,
+        'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        'stock_list': stock_list,
+        'settings': settings
+    }
+    
+    try:
+        with open(DATA_FILE, 'w') as f:
+            json.dump(data, f, default=str)
+        st.session_state.saved_results = serializable_results
+        st.session_state.saved_sector_perf = sector_perf
+        st.session_state.saved_timestamp = data['timestamp']
+        st.session_state.saved_stock_list = stock_list
+        st.session_state.saved_settings = settings
+        return True
+    except Exception as e:
+        st.error(f"Error saving data: {e}")
+        return False
+
+def load_scan_data():
+    """Load scan results from session state"""
+    if st.session_state.saved_results:
+        return {
+            'results': st.session_state.saved_results,
+            'sector_perf': st.session_state.saved_sector_perf,
+            'timestamp': st.session_state.saved_timestamp,
+            'stock_list': st.session_state.saved_stock_list,
+            'settings': st.session_state.saved_settings
+        }
+    return None
+
+def clear_saved_data():
+    """Clear all saved data"""
+    st.session_state.saved_results = None
+    st.session_state.saved_sector_perf = None
+    st.session_state.saved_timestamp = None
+    st.session_state.saved_stock_list = None
+    st.session_state.saved_settings = None
+    if os.path.exists(DATA_FILE):
+        os.remove(DATA_FILE)
+
+# ============================================================
+# LOGIN PAGE
+# ============================================================
+
+if not st.session_state.authenticated:
+    st.set_page_config(page_title="🔒 Scanner Login", page_icon="🔒", layout="centered")
+    
+    # Center the login form
+    col1, col2, col3 = st.columns([1, 2, 1])
+    
+    with col2:
+        st.markdown("""
+        <div style="text-align: center; padding: 40px 20px;">
+            <h1 style="font-size: 50px;">🎯</h1>
+            <h2 style="color: #1f77b4;">Independent Sector Scanner</h2>
+            <p style="color: #666;">Secure Access Required</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        with st.form("login_form"):
+            username = st.text_input("👤 Username", placeholder="Enter username")
+            password = st.text_input("🔑 Password", type="password", placeholder="Enter password")
+            
+            submitted = st.form_submit_button("🔓 Login", use_container_width=True)
+            
+            if submitted:
+                if login(username, password):
+                    st.success("✅ Login successful! Redirecting...")
+                    st.rerun()
+                else:
+                    st.error("❌ Invalid username or password!")
+        
+        st.markdown("""
+        <div style="text-align: center; margin-top: 20px; padding: 15px; background: #f0f2f6; border-radius: 10px;">
+            <small><b>Default Credentials:</b><br>Username: <code>admin</code> | Password: <code>scanner123</code></small>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    st.stop()
+
+# ============================================================
+# MAIN APP (AFTER LOGIN)
+# ============================================================
+
 st.set_page_config(
     page_title="🎯 Independent Sector Scanner",
     page_icon="🎯",
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
+# Logout button in sidebar
+with st.sidebar:
+    st.markdown(f"""
+    <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                padding: 15px; border-radius: 10px; color: white; text-align: center; margin-bottom: 20px;">
+        <b>👤 Welcome, {st.session_state.username}</b><br>
+        <small>{datetime.now().strftime('%d %b %Y | %H:%M')}</small>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    if st.button("🚪 Logout", use_container_width=True):
+        logout()
+        st.rerun()
 
 # Custom CSS
 st.markdown("""
@@ -84,11 +262,41 @@ st.markdown("""
     .news-negative { background: linear-gradient(135deg, #cb2d3e 0%, #ef473a 100%); color: white; padding: 10px; border-radius: 10px; }
     .news-neutral { background: linear-gradient(135deg, #f7971e 0%, #ffd200 100%); color: #333; padding: 10px; border-radius: 10px; }
     .news-item { padding: 8px; margin: 5px 0; border-radius: 8px; background: #f0f2f6; border-left: 4px solid #667eea; }
+    .saved-badge {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 10px 20px;
+        border-radius: 25px;
+        font-weight: bold;
+        display: inline-block;
+    }
+    .persistence-info {
+        background: #e8f4f8;
+        border-left: 4px solid #1f77b4;
+        padding: 12px 15px;
+        border-radius: 8px;
+        margin: 10px 0;
+    }
     </style>
 """, unsafe_allow_html=True)
 
 st.markdown('<p class="main-header">🎯 Independent Sector Scanner</p>', unsafe_allow_html=True)
 st.markdown('<p class="sub-header">Nifty Independent | Sector-Based | Stock-Specific Strength</p>', unsafe_allow_html=True)
+
+# ============================================================
+# PERSISTENCE STATUS BANNER
+# ============================================================
+
+saved_data = load_scan_data()
+if saved_data and saved_data['timestamp']:
+    st.markdown(f"""
+    <div class="persistence-info">
+        <b>💾 Last Scan Saved:</b> {saved_data['timestamp']} | 
+        <b>Stocks:</b> {len(saved_data['stock_list']) if saved_data['stock_list'] else 0} | 
+        <b>Signals:</b> {len(saved_data['results']) if saved_data['results'] else 0}
+        <br><small>✅ Data is saved automatically. Even if PC sleeps, your last scan will be here!</small>
+    </div>
+    """, unsafe_allow_html=True)
 
 # ============================================
 # SECTOR DEFINITIONS & ETFS
@@ -106,7 +314,7 @@ SECTOR_ETFS = {
 
 STOCK_TO_SECTOR = {}
 for sector, stocks in SECTOR_ETFS.items():
-    for stock in stocks[1:]:  # Skip index
+    for stock in stocks[1:]:
         STOCK_TO_SECTOR[stock] = sector
 
 # ============================================
@@ -114,36 +322,27 @@ for sector, stocks in SECTOR_ETFS.items():
 # ============================================
 @st.cache_data(ttl=300)
 def get_sector_performance():
-    """Get how each sector is performing today - INDEPENDENT of Nifty"""
     sector_perf = {}
-    
     for sector, etf_list in SECTOR_ETFS.items():
         try:
-            etf = yf.Ticker(etf_list[0])  # Index/ETF
+            etf = yf.Ticker(etf_list[0])
             df = etf.history(period="2d", interval="5m")
             if df.empty or len(df) < 2:
                 sector_perf[sector] = {"change": 0, "trend": "NEUTRAL"}
                 continue
-            
             df.reset_index(inplace=True)
             df.columns = [c[0] if isinstance(c, tuple) else c for c in df.columns]
-            
             if 'Datetime' in df.columns:
                 df.rename(columns={'Datetime': 'Date'}, inplace=True)
-            
             df['Date'] = pd.to_datetime(df['Date'])
             today = datetime.now().date()
             df_today = df[df['Date'].dt.date == today]
-            
             if df_today.empty:
                 sector_perf[sector] = {"change": 0, "trend": "NEUTRAL"}
                 continue
-            
             open_price = df_today['Open'].iloc[0]
             current = df_today['Close'].iloc[-1]
             change_pct = ((current - open_price) / open_price) * 100
-            
-            # Sector trend independent of Nifty
             if change_pct > 1.5:
                 trend = "STRONG_UP"
             elif change_pct > 0.5:
@@ -154,17 +353,14 @@ def get_sector_performance():
                 trend = "DOWN"
             else:
                 trend = "NEUTRAL"
-            
             sector_perf[sector] = {
                 "change": round(change_pct, 2),
                 "trend": trend,
                 "open": open_price,
                 "current": current
             }
-            
         except:
             sector_perf[sector] = {"change": 0, "trend": "NEUTRAL"}
-    
     return sector_perf
 
 # ============================================
@@ -174,30 +370,23 @@ def fetch_stock_news(symbol):
     try:
         ticker = yf.Ticker(symbol)
         news = ticker.news
-        
         if not news or len(news) == 0:
             return None
-        
         positive_keywords = ['profit', 'growth', 'rise', 'gain', 'bullish', 'buy', 'upgrade', 
                             'strong', 'beat', 'surge', 'rally', 'positive', 'outperform',
                             'record', 'high', 'up', 'increase', 'boost', 'good', 'excellent',
                             'dividend', 'bonus', 'split', 'deal', 'contract', 'expansion']
-        
         negative_keywords = ['loss', 'fall', 'drop', 'decline', 'bearish', 'sell', 'downgrade',
                             'weak', 'miss', 'plunge', 'crash', 'negative', 'underperform',
                             'low', 'down', 'decrease', 'cut', 'bad', 'poor', 'debt',
                             'fraud', 'scam', 'investigation', 'penalty', 'layoff', 'bankrupt']
-        
         analyzed_news = []
         total_score = 0
-        
         for item in news[:5]:
             title = item.get('title', '').lower()
             publisher = item.get('publisher', 'Unknown')
-            
             pos_count = sum(1 for word in positive_keywords if word in title)
             neg_count = sum(1 for word in negative_keywords if word in title)
-            
             if pos_count > neg_count:
                 sentiment = "POSITIVE"
                 score = min(pos_count, 3)
@@ -207,30 +396,25 @@ def fetch_stock_news(symbol):
             else:
                 sentiment = "NEUTRAL"
                 score = 0
-            
             total_score += score
-            
             analyzed_news.append({
                 'title': item.get('title', ''),
                 'publisher': publisher,
                 'sentiment': sentiment,
                 'score': score
             })
-        
         if total_score >= 2:
             overall = "POSITIVE"
         elif total_score <= -2:
             overall = "NEGATIVE"
         else:
             overall = "NEUTRAL"
-        
         return {
             'overall_sentiment': overall,
             'total_score': total_score,
             'news_count': len(analyzed_news),
             'articles': analyzed_news
         }
-        
     except:
         return None
 
@@ -250,11 +434,8 @@ def fetch_oi_data_nse(symbol):
         session = requests.Session()
         headers = get_nse_headers()
         session.get('https://www.nseindia.com/', headers=headers, timeout=5)
-        
         url = f"https://www.nseindia.com/api/option-chain-indices?symbol={symbol}" if symbol in ['NIFTY', 'BANKNIFTY', 'FINNIFTY'] else f"https://www.nseindia.com/api/option-chain-equities?symbol={symbol}"
-        
         response = session.get(url, headers=headers, timeout=5)
-        
         if response.status_code == 200:
             data = response.json()
             return parse_oi_data(data)
@@ -265,41 +446,32 @@ def fetch_oi_data_nse(symbol):
 def parse_oi_data(data):
     if not data or 'records' not in data:
         return None
-    
     records = data['records']
     underlying_value = records.get('underlyingValue', 0)
     strikes = records.get('data', [])
-    
     if not strikes:
         return None
-    
     total_ce_oi = 0
     total_pe_oi = 0
     total_ce_change = 0
     total_pe_change = 0
-    
     atm_strike = None
     min_diff = float('inf')
-    
     for strike_data in strikes:
         strike = strike_data.get('strikePrice', 0)
         diff = abs(strike - underlying_value)
         if diff < min_diff:
             min_diff = diff
             atm_strike = strike
-        
         if 'CE' in strike_data and strike_data['CE']:
             ce = strike_data['CE']
             total_ce_oi += ce.get('openInterest', 0)
             total_ce_change += ce.get('changeinOpenInterest', 0)
-        
         if 'PE' in strike_data and strike_data['PE']:
             pe = strike_data['PE']
             total_pe_oi += pe.get('openInterest', 0)
             total_pe_change += pe.get('changeinOpenInterest', 0)
-    
     pcr_oi = total_pe_oi / total_ce_oi if total_ce_oi > 0 else 0
-    
     if total_pe_change > 0 and total_ce_change < 0:
         oi_buildup = "BULLISH BUILDUP"
     elif total_ce_change > 0 and total_pe_change < 0:
@@ -310,7 +482,6 @@ def parse_oi_data(data):
         oi_buildup = "MILD BEARISH"
     else:
         oi_buildup = "NEUTRAL"
-    
     if pcr_oi > 1.3:
         oi_signal = "STRONG LONG"
     elif pcr_oi > 1.1:
@@ -321,7 +492,6 @@ def parse_oi_data(data):
         oi_signal = "SHORT"
     else:
         oi_signal = "NEUTRAL"
-    
     return {
         'underlying': round(underlying_value, 2),
         'atm_strike': atm_strike,
@@ -349,6 +519,30 @@ stock_options = {
         "EICHERMOT.NS", "TATAMOTORS.NS", "DIVISLAB.NS", "HDFCLIFE.NS", "COALINDIA.NS",
         "JSWSTEEL.NS", "HEROMOTOCO.NS", "BPCL.NS", "DRREDDY.NS", "ADANIPORTS.NS",
         "HINDALCO.NS", "UPL.NS", "SHREECEM.NS", "BAJAJ-AUTO.NS", "TATACONSUM.NS"
+    ],
+    "Nifty Next 50": [
+        "BERGEPAINT.NS", "CHOLAFIN.NS", "DABUR.NS", "GODREJCP.NS", "HAVELLS.NS",
+        "ICICIPRULI.NS", "INDIGO.NS", "JINDALSTEL.NS", "LICI.NS", "LODHA.NS",
+        "MCDOWELL-N.NS", "MOTHERSON.NS", "NAUKRI.NS", "PIDILITIND.NS", "POLYCAB.NS",
+        "SAMMAANCAP.NS", "SIEMENS.NS", "SRF.NS", "TORNTPHARM.NS", "TVSMOTOR.NS",
+        "ABB.NS", "ACC.NS", "AMBUJACEM.NS", "AUROPHARMA.NS", "BANDHANBNK.NS",
+        "BANKBARODA.NS", "BEL.NS", "BHEL.NS", "CANBK.NS", "COLPAL.NS",
+        "CONCOR.NS", "CUMMINSIND.NS", "DMART.NS", "GAIL.NS", "GODREJPROP.NS",
+        "HAL.NS", "HINDPETRO.NS", "IDBI.NS", "IDFCFIRSTB.NS", "INDUSTOWER.NS",
+        "IOB.NS", "IRCTC.NS", "JUBLFOOD.NS", "L&TFH.NS", "LUPIN.NS",
+        "MARICO.NS", "MUTHOOTFIN.NS", "NMDC.NS", "OBEROIRLTY.NS", "PFC.NS"
+    ],
+    "Nifty Midcap 100": [
+        "ABBOTINDIA.NS", "ALKEM.NS", "APLAPOLLO.NS", "ASTRAL.NS", "ATUL.NS",
+        "BATAINDIA.NS", "BHARATFORG.NS", "BIKAJI.NS", "BLUESTARCO.NS", "BSOFT.NS",
+        "CGPOWER.NS", "CHAMBLFERT.NS", "COFORGE.NS", "COROMANDEL.NS", "CREDITACC.NS",
+        "CROMPTON.NS", "CYIENT.NS", "DALBHARAT.NS", "DEEPAKNTR.NS", "DELHIVERY.NS",
+        "DIXON.NS", "ESCORTS.NS", "EXIDEIND.NS", "FEDERALBNK.NS", "GLAND.NS",
+        "GLAXO.NS", "GLENMARK.NS", "GNFC.NS", "GODREJIND.NS", "GUJGASLTD.NS",
+        "HAPPSTMNDS.NS", "HINDCOPPER.NS", "HINDZINC.NS", "HUDCO.NS", "IIFL.NS",
+        "INDIAMART.NS", "INDIANB.NS", "IPCALAB.NS", "JBCHEPHARM.NS", "JSL.NS",
+        "KEI.NS", "KPITTECH.NS", "LALPATHLAB.NS", "LAURUSLABS.NS", "LINDEINDIA.NS",
+        "LTTS.NS", "M&MFIN.NS", "MANAPPURAM.NS", "MAXHEALTH.NS", "METROBRAND.NS"
     ],
     "Bank Nifty": [
         "HDFCBANK.NS", "ICICIBANK.NS", "KOTAKBANK.NS", "AXISBANK.NS", "SBIN.NS",
@@ -397,7 +591,15 @@ st.sidebar.subheader("Price Filters")
 min_price = st.sidebar.number_input("Min Price (₹)", 50, 50000, 100)
 max_price = st.sidebar.number_input("Max Price (₹)", 50, 50000, 10000)
 
-refresh = st.sidebar.button("🔄 SCAN NOW", type="primary")
+# Buttons
+st.sidebar.markdown("---")
+refresh = st.sidebar.button("🔄 SCAN NOW", type="primary", use_container_width=True)
+
+# Clear saved data button
+if st.sidebar.button("🗑️ Clear Saved Data", use_container_width=True):
+    clear_saved_data()
+    st.sidebar.success("✅ Saved data cleared!")
+    st.rerun()
 
 st.sidebar.markdown("---")
 st.sidebar.info(f"""
@@ -418,20 +620,16 @@ def fetch_data(symbol, period="5d", interval="5m"):
         df = ticker.history(period=period, interval=interval)
         if df.empty:
             return None
-        
         df.reset_index(inplace=True)
         df.columns = [c[0] if isinstance(c, tuple) else c for c in df.columns]
-        
         if 'Datetime' in df.columns:
             df.rename(columns={'Datetime': 'Date'}, inplace=True)
         elif 'Date' not in df.columns and len(df.columns) > 0:
             first_col = df.columns[0]
             df.rename(columns={first_col: 'Date'}, inplace=True)
-        
         for col in ['Open', 'High', 'Low', 'Close', 'Volume']:
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors='coerce')
-        
         return df
     except:
         return None
@@ -485,42 +683,32 @@ def detect_price_action(df):
     try:
         if len(df) < 3:
             return "NEUTRAL", 0
-        
         last = df.iloc[-1]
         prev = df.iloc[-2]
         prev2 = df.iloc[-3]
-        
         patterns = []
-        
         if prev['Close'] < prev['Open'] and last['Close'] > last['Open'] and last['Open'] < prev['Close'] and last['Close'] > prev['Open']:
             patterns.append(("Bullish Engulfing", 2))
         elif prev['Close'] > prev['Open'] and last['Close'] < last['Open'] and last['Open'] > prev['Close'] and last['Close'] < prev['Open']:
             patterns.append(("Bearish Engulfing", -2))
-        
         if last['Close'] > last['Open'] and (last['Low'] - min(last['Open'], last['Close'])) > 2 * abs(last['Close'] - last['Open']):
             patterns.append(("Hammer", 1))
-        
         if last['Close'] < last['Open'] and (max(last['Open'], last['Close']) - last['High']) > 2 * abs(last['Close'] - last['Open']):
             patterns.append(("Shooting Star", -1))
-        
         if (last['Close'] > last['Open'] and prev['Close'] > prev['Open'] and prev2['Close'] > prev2['Open'] and
             last['Close'] > prev['Close'] > prev2['Close']):
             patterns.append(("Three White Soldiers", 3))
-        
         if (last['Close'] < last['Open'] and prev['Close'] < prev['Open'] and prev2['Close'] < prev2['Open'] and
             last['Close'] < prev['Close'] < prev2['Close']):
             patterns.append(("Three Black Crows", -3))
-        
         if not patterns:
             return "NEUTRAL", 0
-        
         score = sum(p[1] for p in patterns)
         if score >= 2:
             return "BULLISH", score
         elif score <= -2:
             return "BEARISH", abs(score)
         return "NEUTRAL", 0
-        
     except:
         return "NEUTRAL", 0
 
@@ -691,7 +879,7 @@ def analyze_orb_ultimate(symbol, sector_perf, orb_mins=15):
         except:
             filter_details.append(("❌ Prev Day", False, "Error"))
     
-    # 8. SECTOR STRENGTH (NEW - NIFTY INDEPENDENT)
+    # 8. SECTOR STRENGTH
     sector = STOCK_TO_SECTOR.get(symbol, None)
     if sector and sector_perf and sector in sector_perf:
         total_filters += 1
@@ -707,7 +895,7 @@ def analyze_orb_ultimate(symbol, sector_perf, orb_mins=15):
                 sector_pass = False
             else:
                 sector_pass = False
-        else:  # SELL
+        else:
             if sector_trend in ["STRONG_DOWN", "DOWN"]:
                 filters_passed += 1
                 sector_pass = True
@@ -784,7 +972,6 @@ def get_final_signal(orb_signal, accuracy, oi_data, news_data):
         elif oi_signal == "SHORT":
             oi_score = -1
     
-    # News impact
     news_impact = "NO DATA"
     if news_data:
         overall = news_data['overall_sentiment']
@@ -814,9 +1001,172 @@ def get_final_signal(orb_signal, accuracy, oi_data, news_data):
     return "🟡 NEUTRAL", combined, oi_signal, oi_buildup, news_impact
 
 # ============================================
+# DISPLAY RESULTS FUNCTION (REUSABLE)
+# ============================================
+def display_results(results, sector_perf):
+    """Display scan results - used for both fresh and saved data"""
+    if not results:
+        st.warning(f"⚠️ No signals found.")
+        st.info("💡 Market hours: 9:15 AM - 3:30 PM IST")
+        return
+    
+    strong_buy = len([r for r in results if "STRONG BUY" in r['final_signal']])
+    buy = len([r for r in results if r['final_signal'] == "🟢 BUY"])
+    strong_sell = len([r for r in results if "STRONG SELL" in r['final_signal']])
+    sell = len([r for r in results if r['final_signal'] == "🔴 SELL"])
+    
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.markdown(f'<div class="metric-card"><h3>🚀 STRONG BUY</h3><h1>{strong_buy}</h1></div>', unsafe_allow_html=True)
+    with col2:
+        st.markdown(f'<div class="metric-card"><h3>🟢 BUY</h3><h1>{buy}</h1></div>', unsafe_allow_html=True)
+    with col3:
+        st.markdown(f'<div class="metric-card"><h3>🔴 SELL</h3><h1>{sell}</h1></div>', unsafe_allow_html=True)
+    with col4:
+        st.markdown(f'<div class="metric-card"><h3>🔻 STRONG SELL</h3><h1>{strong_sell}</h1></div>', unsafe_allow_html=True)
+    
+    st.markdown("---")
+    results = sorted(results, key=lambda x: x['accuracy'], reverse=True)
+    
+    for row in results:
+        sig = row['final_signal']
+        acc = row['accuracy']
+        
+        if "STRONG BUY" in sig:
+            card_class = "strong-buy"
+        elif sig == "🟢 BUY":
+            card_class = "buy"
+        elif "STRONG SELL" in sig:
+            card_class = "strong-sell"
+        elif sig == "🔴 SELL":
+            card_class = "sell"
+        else:
+            card_class = "neutral"
+        
+        if acc >= 85:
+            acc_class = "acc-90"
+        elif acc >= 75:
+            acc_class = "acc-80"
+        else:
+            acc_class = "acc-70"
+        
+        with st.expander(f"{sig} **{row['symbol']}** | ₹{row['current_price']} | {acc}%"):
+            
+            st.markdown(f'<div class="signal-card {card_class}"><h2>{sig}</h2></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="accuracy-badge {acc_class}">🎯 {acc}% ({row["filters_passed"]}/{row["total_filters"]})</div>', unsafe_allow_html=True)
+            
+            # Sector info
+            if row.get('sector'):
+                st.markdown(f"""
+                <div class="filter-box">
+                <b>🏭 Sector: {row['sector']}</b> | Change: {row.get('sector_change', 0):+.2f}%
+                </div>
+                """, unsafe_allow_html=True)
+            
+            # News
+            if row.get('news_impact') and row['news_impact'] != "NO DATA":
+                news_sentiment = "POSITIVE" if row['news_impact'] == "SUPPORTS" else ("NEGATIVE" if row['news_impact'] == "CONTRADICTS" else "NEUTRAL")
+                news_class = "news-positive" if news_sentiment == "POSITIVE" else ("news-negative" if news_sentiment == "NEGATIVE" else "news-neutral")
+                st.markdown(f'<div class="{news_class}"><b>📰 News Impact: {row["news_impact"]}</b></div>', unsafe_allow_html=True)
+            
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                st.markdown(f"""
+                <div class="filter-box">
+                <b>📈 Trade</b><br>
+                Entry: <b>₹{row['entry_price']}</b><br>
+                SL: <span style="color:red">₹{row['stop_loss']}</span><br>
+                Target: <span style="color:green">₹{row['target']}</span><br>
+                Risk: ₹{row['risk']} ({row['risk_percent']}%)<br>
+                R:R = 1:{risk_reward}
+                </div>
+                """, unsafe_allow_html=True)
+            
+            with col2:
+                st.markdown(f"""
+                <div class="filter-box">
+                <b>📊 Tech</b><br>
+                RSI: {row.get('rsi', 'N/A')}<br>
+                VWAP: ₹{row['vwap'] if row.get('vwap') else 'N/A'}<br>
+                ATR: ₹{row.get('atr', 'N/A')}<br>
+                EMA20: ₹{row['ema20'] if row.get('ema20') else 'N/A'}
+                </div>
+                """, unsafe_allow_html=True)
+            
+            with col3:
+                if row.get('oi_signal') and row['oi_signal'] != "NEUTRAL":
+                    st.markdown(f"""
+                    <div class="filter-box">
+                    <b>🔥 OI</b><br>
+                    {row.get('oi_buildup', 'N/A')}<br>
+                    Signal: {row['oi_signal']}
+                    </div>
+                    """, unsafe_allow_html=True)
+            
+            st.markdown("---")
+            st.markdown("**📋 Filters:**")
+            cols = st.columns(4)
+            filter_details = row.get('filter_details', [])
+            for i, item in enumerate(filter_details):
+                with cols[i % 4]:
+                    if isinstance(item, list) and len(item) >= 3:
+                        filter_name, passed, detail = item[0], item[1], item[2]
+                    elif isinstance(item, tuple) and len(item) >= 3:
+                        filter_name, passed, detail = item[0], item[1], item[2]
+                    else:
+                        continue
+                    color = "green" if passed else "red"
+                    st.markdown(f'<p style="color:{color}; font-weight:bold;">{filter_name}</p><small>{detail}</small>', unsafe_allow_html=True)
+    
+    st.markdown("---")
+    df_export = pd.DataFrame([{k: v for k, v in r.items() if k not in ['oi_data', 'news_data', 'filter_details']} for r in results])
+    csv = df_export.to_csv(index=False)
+    st.download_button(
+        label="📥 Download Signals",
+        data=csv,
+        file_name=f"sector_scanner_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+        mime="text/csv"
+    )
+
+# ============================================
 # MAIN SCANNING
 # ============================================
-if refresh:
+
+# First, show saved data if available and no new scan requested
+if not refresh and saved_data and saved_data['results']:
+    st.markdown("""
+    <div style="background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%); 
+                color: white; padding: 15px; border-radius: 10px; text-align: center; margin-bottom: 20px;">
+        <h3>💾 Showing Last Saved Scan</h3>
+        <p>Last scanned on: <b>{}</b> | Click "🔄 SCAN NOW" for fresh data</p>
+    </div>
+    """.format(saved_data['timestamp']), unsafe_allow_html=True)
+    
+    # Show saved sector performance
+    if saved_data['sector_perf']:
+        st.markdown("### 📊 Sector Performance (Saved)")
+        sector_cols = st.columns(4)
+        col_idx = 0
+        for sector, data in saved_data['sector_perf'].items():
+            trend = data.get('trend', 'NEUTRAL')
+            change = data.get('change', 0)
+            
+            if trend in ["STRONG_UP", "UP"]:
+                sec_class = "sector-strong"
+            elif trend in ["STRONG_DOWN", "DOWN"]:
+                sec_class = "sector-weak"
+            else:
+                sec_class = "sector-neutral"
+            
+            with sector_cols[col_idx % 4]:
+                st.markdown(f'<div class="sector-card {sec_class}"><b>{sector}</b><br>{change:+.2f}%<br>{trend}</div>', unsafe_allow_html=True)
+            col_idx += 1
+    
+    st.markdown("---")
+    display_results(saved_data['results'], saved_data['sector_perf'])
+
+elif refresh:
     st.subheader("🔍 Scanning (Nifty Independent)...")
     
     # Get sector performance FIRST
@@ -891,124 +1241,39 @@ if refresh:
     progress_bar.empty()
     status_text.empty()
     
-    # DISPLAY
-    if not results:
-        st.warning(f"⚠️ No {min_accuracy}% signals found.")
-        st.info("💡 Market hours: 9:15 AM - 3:30 PM IST")
+    # SAVE DATA FOR PERSISTENCE
+    settings = {
+        'accuracy_mode': accuracy_mode,
+        'min_accuracy': min_accuracy,
+        'orb_minutes': orb_minutes,
+        'risk_reward': risk_reward,
+        'min_price': min_price,
+        'max_price': max_price,
+        'use_sector': use_sector,
+        'use_oi': use_oi,
+        'use_news': use_news
+    }
+    
+    if results:
+        save_scan_data(results, sector_perf, stock_list, settings)
+        st.success(f"✅ Scan complete! {len(results)} signals found. Data saved automatically.")
     else:
-        strong_buy = len([r for r in results if "STRONG BUY" in r['final_signal']])
-        buy = len([r for r in results if r['final_signal'] == "🟢 BUY"])
-        strong_sell = len([r for r in results if "STRONG SELL" in r['final_signal']])
-        sell = len([r for r in results if r['final_signal'] == "🔴 SELL"])
-        
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.markdown(f'<div class="metric-card"><h3>🚀 STRONG BUY</h3><h1>{strong_buy}</h1></div>', unsafe_allow_html=True)
-        with col2:
-            st.markdown(f'<div class="metric-card"><h3>🟢 BUY</h3><h1>{buy}</h1></div>', unsafe_allow_html=True)
-        with col3:
-            st.markdown(f'<div class="metric-card"><h3>🔴 SELL</h3><h1>{sell}</h1></div>', unsafe_allow_html=True)
-        with col4:
-            st.markdown(f'<div class="metric-card"><h3>🔻 STRONG SELL</h3><h1>{strong_sell}</h1></div>', unsafe_allow_html=True)
-        
-        st.markdown("---")
-        results = sorted(results, key=lambda x: x['accuracy'], reverse=True)
-        
-        for row in results:
-            sig = row['final_signal']
-            acc = row['accuracy']
-            
-            if "STRONG BUY" in sig:
-                card_class = "strong-buy"
-            elif sig == "🟢 BUY":
-                card_class = "buy"
-            elif "STRONG SELL" in sig:
-                card_class = "strong-sell"
-            elif sig == "🔴 SELL":
-                card_class = "sell"
-            else:
-                card_class = "neutral"
-            
-            if acc >= 85:
-                acc_class = "acc-90"
-            elif acc >= 75:
-                acc_class = "acc-80"
-            else:
-                acc_class = "acc-70"
-            
-            with st.expander(f"{sig} **{row['symbol']}** | ₹{row['current_price']} | {acc}%"):
-                
-                st.markdown(f'<div class="signal-card {card_class}"><h2>{sig}</h2></div>', unsafe_allow_html=True)
-                st.markdown(f'<div class="accuracy-badge {acc_class}">🎯 {acc}% ({row["filters_passed"]}/{row["total_filters"]})</div>', unsafe_allow_html=True)
-                
-                # Sector info
-                if row['sector']:
-                    st.markdown(f"""
-                    <div class="filter-box">
-                    <b>🏭 Sector: {row['sector']}</b> | Change: {row['sector_change']:+.2f}%
-                    </div>
-                    """, unsafe_allow_html=True)
-                
-                # News
-                if row['news_data']:
-                    news = row['news_data']
-                    news_class = "news-positive" if news['overall_sentiment'] == "POSITIVE" else ("news-negative" if news['overall_sentiment'] == "NEGATIVE" else "news-neutral")
-                    st.markdown(f'<div class="{news_class}"><b>📰 News: {news["overall_sentiment"]}</b> | Impact: {row["news_impact"]}</div>', unsafe_allow_html=True)
-                
-                col1, col2, col3 = st.columns(3)
-                
-                with col1:
-                    st.markdown(f"""
-                    <div class="filter-box">
-                    <b>📈 Trade</b><br>
-                    Entry: <b>₹{row['entry_price']}</b><br>
-                    SL: <span style="color:red">₹{row['stop_loss']}</span><br>
-                    Target: <span style="color:green">₹{row['target']}</span><br>
-                    Risk: ₹{row['risk']} ({row['risk_percent']}%)<br>
-                    R:R = 1:{risk_reward}
-                    </div>
-                    """, unsafe_allow_html=True)
-                
-                with col2:
-                    st.markdown(f"""
-                    <div class="filter-box">
-                    <b>📊 Tech</b><br>
-                    RSI: {row['rsi']}<br>
-                    VWAP: ₹{row['vwap'] if row['vwap'] else 'N/A'}<br>
-                    ATR: ₹{row['atr']}<br>
-                    EMA20: ₹{row['ema20'] if row['ema20'] else 'N/A'}
-                    </div>
-                    """, unsafe_allow_html=True)
-                
-                with col3:
-                    if row['oi_data']:
-                        oi = row['oi_data']
-                        st.markdown(f"""
-                        <div class="filter-box">
-                        <b>🔥 OI</b><br>
-                        {row['oi_buildup']}<br>
-                        PCR: {oi['pcr_oi']}<br>
-                        Signal: {row['oi_signal']}
-                        </div>
-                        """, unsafe_allow_html=True)
-                
-                st.markdown("---")
-                st.markdown("**📋 Filters:**")
-                cols = st.columns(4)
-                for i, (filter_name, passed, detail) in enumerate(row['filter_details']):
-                    with cols[i % 4]:
-                        color = "green" if passed else "red"
-                        st.markdown(f'<p style="color:{color}; font-weight:bold;">{filter_name}</p><small>{detail}</small>', unsafe_allow_html=True)
-        
-        st.markdown("---")
-        df_export = pd.DataFrame([{k: v for k, v in r.items() if k not in ['oi_data', 'news_data', 'filter_details']} for r in results])
-        csv = df_export.to_csv(index=False)
-        st.download_button(
-            label="📥 Download Signals",
-            data=csv,
-            file_name=f"sector_scanner_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
-            mime="text/csv"
-        )
+        # Save empty results too so we know scan was done
+        save_scan_data([], sector_perf, stock_list, settings)
+    
+    # DISPLAY
+    display_results(results, sector_perf)
+
+else:
+    # No saved data and no scan yet
+    st.info("""
+    👋 **Welcome!** 
+    
+    Click **🔄 SCAN NOW** in the sidebar to start scanning.
+    
+    💡 **Tip:** Your scan results will be **automatically saved** even if your PC goes to sleep!
+    Next time you open this app, your last scan will be displayed.
+    """)
 
 # ============================================
 # EDUCATION
@@ -1055,5 +1320,14 @@ st.markdown("""
 <div style="text-align: center; color: gray; font-size: 12px;">
 <b>⚠️ Disclaimer:</b> Educational purposes only. Not financial advice. 
 <br><b>🎯 Nifty Independent | Sector Based | Stock-Specific Analysis</b>
+<br><b>🔒 Secure Login Enabled | 💾 Auto-Save Enabled</b>
 </div>
 """, unsafe_allow_html=True)
+'''
+
+with open('/mnt/agents/output/app.py', 'w', encoding='utf-8') as f:
+    f.write(code)
+
+print("✅ File saved successfully!")
+print(f"📁 Location: /mnt/agents/output/app.py")
+print(f"📊 Size: {len(code)} characters")
