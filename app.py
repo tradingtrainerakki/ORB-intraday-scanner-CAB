@@ -27,6 +27,121 @@ def get_ist_date():
     return datetime.now(IST).date()
 
 # ============================================================
+# DHAN API SETUP
+# ============================================================
+# Dhan Security IDs for Nifty 50 stocks
+DHAN_SECURITY_IDS = {
+    "RELIANCE": "2885", "TCS": "11536", "HDFCBANK": "1333", "ICICIBANK": "4963",
+    "INFY": "1594", "HINDUNILVR": "1394", "ITC": "1660", "SBIN": "3045",
+    "BHARTIARTL": "10604", "KOTAKBANK": "1922", "LT": "11483", "AXISBANK": "5900",
+    "ASIANPAINT": "236", "MARUTI": "10999", "TITAN": "3506", "SUNPHARMA": "3351",
+    "BAJFINANCE": "317", "WIPRO": "3787", "ULTRACEMCO": "11532", "NESTLEIND": "17963",
+    "POWERGRID": "14977", "NTPC": "11630", "TATASTEEL": "3499", "M&M": "2031",
+    "HCLTECH": "1851", "TECHM": "13538", "INDUSINDBK": "5258", "GRASIM": "1232",
+    "ADANIENT": "25", "CIPLA": "694", "SBILIFE": "21808", "BAJAJFINSV": "16675",
+    "BRITANNIA": "1406", "APOLLOHOSP": "157", "ONGC": "2475", "EICHERMOT": "910",
+    "TATAMOTORS": "3456", "DIVISLAB": "10568", "HDFCLIFE": "467", "COALINDIA": "20374",
+    "JSWSTEEL": "11723", "HEROMOTOCO": "1348", "BPCL": "526", "DRREDDY": "881",
+    "ADANIPORTS": "15083", "HINDALCO": "1363", "UPL": "11287", "SHREECEM": "3103",
+    "BAJAJ-AUTO": "16669", "TATACONSUM": "3432",
+}
+
+# Dhan API endpoints
+DHAN_BASE_URL = "https://api.dhan.co/v2"
+
+def get_dhan_headers(access_token):
+    return {
+        'Content-Type': 'application/json',
+        'access-token': access_token
+    }
+
+def fetch_dhan_intraday_data(security_id, access_token, interval="5", from_date=None, to_date=None):
+    """Fetch intraday data from Dhan API"""
+    try:
+        if from_date is None:
+            from_date = (get_ist_now() - timedelta(days=5)).strftime('%Y-%m-%d %H:%M:%S')
+        if to_date is None:
+            to_date = get_ist_now().strftime('%Y-%m-%d %H:%M:%S')
+
+        url = f"{DHAN_BASE_URL}/charts/intraday"
+        payload = {
+            "securityId": security_id,
+            "exchangeSegment": "NSE_EQ",
+            "instrument": "EQUITY",
+            "interval": interval,
+            "fromDate": from_date,
+            "toDate": to_date
+        }
+
+        response = requests.post(url, json=payload, headers=get_dhan_headers(access_token), timeout=10)
+
+        if response.status_code == 200:
+            data = response.json()
+            if data and 'open' in data:
+                df = pd.DataFrame({
+                    'Open': data['open'],
+                    'High': data['high'],
+                    'Low': data['low'],
+                    'Close': data['close'],
+                    'Volume': data['volume'],
+                    'timestamp': data['timestamp']
+                })
+                df['Date'] = pd.to_datetime(df['timestamp'], unit='s').dt.tz_localize('UTC').dt.tz_convert('Asia/Kolkata')
+                df = df.drop('timestamp', axis=1)
+                return df
+        return None
+    except Exception as e:
+        st.error(f"Dhan API Error: {e}")
+        return None
+
+def fetch_dhan_daily_data(security_id, access_token, from_date=None, to_date=None):
+    """Fetch daily data from Dhan API"""
+    try:
+        if from_date is None:
+            from_date = (get_ist_now() - timedelta(days=30)).strftime('%Y-%m-%d')
+        if to_date is None:
+            to_date = get_ist_now().strftime('%Y-%m-%d')
+
+        url = f"{DHAN_BASE_URL}/charts/historical"
+        payload = {
+            "securityId": security_id,
+            "exchangeSegment": "NSE_EQ",
+            "instrument": "EQUITY",
+            "fromDate": from_date,
+            "toDate": to_date
+        }
+
+        response = requests.post(url, json=payload, headers=get_dhan_headers(access_token), timeout=10)
+
+        if response.status_code == 200:
+            data = response.json()
+            if data and 'open' in data:
+                df = pd.DataFrame({
+                    'Open': data['open'],
+                    'High': data['high'],
+                    'Low': data['low'],
+                    'Close': data['close'],
+                    'Volume': data['volume'],
+                    'timestamp': data['timestamp']
+                })
+                df['Date'] = pd.to_datetime(df['timestamp'], unit='s').dt.tz_localize('UTC').dt.tz_convert('Asia/Kolkata')
+                df = df.drop('timestamp', axis=1)
+                return df
+        return None
+    except Exception as e:
+        st.error(f"Dhan API Error: {e}")
+        return None
+
+def get_symbol_from_ns(symbol_ns):
+    """Extract symbol from .NS format"""
+    return symbol_ns.replace('.NS', '')
+
+def get_dhan_security_id(symbol_ns):
+    """Get Dhan security ID for a symbol"""
+    symbol = get_symbol_from_ns(symbol_ns)
+    return DHAN_SECURITY_IDS.get(symbol, None)
+
+# ============================================================
 # STREAMLIT CLOUD COMPATIBLE PATHS
 # ============================================================
 TEMP_DIR = tempfile.gettempdir()
@@ -35,8 +150,8 @@ DATA_FILE = os.path.join(TEMP_DIR, "scanner_data.json")
 # ============================================================
 # PASSWORD PROTECTION
 # ============================================================
-DEFAULT_USERNAME = "Akki"
-DEFAULT_PASSWORD = "Ca@1809"
+DEFAULT_USERNAME = "admin"
+DEFAULT_PASSWORD = "scanner123"
 
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
@@ -379,6 +494,44 @@ def parse_oi_data(data):
 
 st.sidebar.header("Scanner Settings")
 
+# ============================================================
+# DATA SOURCE SELECTION
+# ============================================================
+st.sidebar.subheader("Data Source")
+data_source = st.sidebar.radio(
+    "Select Data Provider",
+    ["Yahoo Finance (Free, 15min delay)", "Dhan API (Real-time, requires API key)"]
+)
+
+dhan_access_token = ""
+if "Dhan" in data_source:
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("### Dhan API Setup")
+
+    # Step 1: Generate Token
+    st.sidebar.markdown("**Step 1:** [Click here to generate token](https://web.dhan.co/dhanhq)")
+    st.sidebar.caption("Login → DhanHQ Trading APIs → Generate Access Token → Copy")
+
+    # Step 2: Paste Token
+    st.sidebar.markdown("**Step 2:** Paste your token below")
+    dhan_access_token = st.sidebar.text_input(
+        "Dhan Access Token",
+        type="password",
+        placeholder="Paste token here and press Enter",
+        help="Token expires in 24 hours. Generate a new one daily."
+    )
+
+    # Show token status
+    if dhan_access_token:
+        st.sidebar.success("Token saved for this session!")
+        st.sidebar.caption("Token will be lost if you refresh the page. That's normal.")
+    else:
+        st.sidebar.warning("Please paste your Dhan Access Token above")
+
+    st.sidebar.markdown("---")
+    st.sidebar.info("Token expires every 24 hours. Generate a new one each morning before market opens.")
+
+
 stock_options = {
     "Nifty 50": ["RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "ICICIBANK.NS", "INFY.NS", "HINDUNILVR.NS", "ITC.NS", "SBIN.NS", "BHARTIARTL.NS", "KOTAKBANK.NS", "LT.NS", "AXISBANK.NS", "ASIANPAINT.NS", "MARUTI.NS", "TITAN.NS", "SUNPHARMA.NS", "BAJFINANCE.NS", "WIPRO.NS", "ULTRACEMCO.NS", "NESTLEIND.NS", "POWERGRID.NS", "NTPC.NS", "TATASTEEL.NS", "M&M.NS", "HCLTECH.NS", "TECHM.NS", "INDUSINDBK.NS", "GRASIM.NS", "ADANIENT.NS", "CIPLA.NS", "SBILIFE.NS", "BAJAJFINSV.NS", "BRITANNIA.NS", "APOLLOHOSP.NS", "ONGC.NS", "EICHERMOT.NS", "TATAMOTORS.NS", "DIVISLAB.NS", "HDFCLIFE.NS", "COALINDIA.NS", "JSWSTEEL.NS", "HEROMOTOCO.NS", "BPCL.NS", "DRREDDY.NS", "ADANIPORTS.NS", "HINDALCO.NS", "UPL.NS", "SHREECEM.NS", "BAJAJ-AUTO.NS", "TATACONSUM.NS"],
     "Nifty Next 50": ["BERGEPAINT.NS", "CHOLAFIN.NS", "DABUR.NS", "GODREJCP.NS", "HAVELLS.NS", "ICICIPRULI.NS", "INDIGO.NS", "JINDALSTEL.NS", "LICI.NS", "LODHA.NS", "MCDOWELL-N.NS", "MOTHERSON.NS", "NAUKRI.NS", "PIDILITIND.NS", "POLYCAB.NS", "SAMMAANCAP.NS", "SIEMENS.NS", "SRF.NS", "TORNTPHARM.NS", "TVSMOTOR.NS", "ABB.NS", "ACC.NS", "AMBUJACEM.NS", "AUROPHARMA.NS", "BANDHANBNK.NS", "BANKBARODA.NS", "BEL.NS", "BHEL.NS", "CANBK.NS", "COLPAL.NS", "CONCOR.NS", "CUMMINSIND.NS", "DMART.NS", "GAIL.NS", "GODREJPROP.NS", "HAL.NS", "HINDPETRO.NS", "IDBI.NS", "IDFCFIRSTB.NS", "INDUSTOWER.NS", "IOB.NS", "IRCTC.NS", "JUBLFOOD.NS", "L&TFH.NS", "LUPIN.NS", "MARICO.NS", "MUTHOOTFIN.NS", "NMDC.NS", "OBEROIRLTY.NS", "PFC.NS"],
@@ -433,8 +586,32 @@ st.sidebar.info(f"""**{accuracy_mode}**
 - Expected Win Rate: {min_accuracy}-{min_accuracy+10}%""")
 
 @st.cache_data(ttl=300)
-def fetch_data(symbol, period="5d", interval="5m"):
+def fetch_data(symbol, period="5d", interval="5m", data_source="Yahoo Finance", access_token=""):
     try:
+        # Use Dhan API if selected and token is provided
+        if "Dhan" in data_source and access_token:
+            security_id = get_dhan_security_id(symbol)
+            if security_id:
+                # Map interval
+                interval_map = {"1m": "1", "5m": "5", "15m": "15", "30m": "25", "60m": "60"}
+                dhan_interval = interval_map.get(interval, "5")
+
+                # Calculate from/to dates based on period
+                days_map = {"1d": 1, "5d": 5, "10d": 10, "30d": 30, "90d": 90}
+                days = days_map.get(period, 5)
+
+                from_date = (get_ist_now() - timedelta(days=days)).strftime('%Y-%m-%d %H:%M:%S')
+                to_date = get_ist_now().strftime('%Y-%m-%d %H:%M:%S')
+
+                df = fetch_dhan_intraday_data(security_id, access_token, dhan_interval, from_date, to_date)
+                if df is not None and not df.empty:
+                    return df
+                else:
+                    st.warning(f"Dhan API failed for {symbol}, falling back to Yahoo Finance")
+            else:
+                st.warning(f"Dhan Security ID not found for {symbol}, using Yahoo Finance")
+
+        # Fallback to Yahoo Finance
         ticker = yf.Ticker(symbol)
         df = ticker.history(period=period, interval=interval)
         if df.empty:
@@ -450,7 +627,8 @@ def fetch_data(symbol, period="5d", interval="5m"):
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors='coerce')
         return df
-    except:
+    except Exception as e:
+        st.error(f"Error fetching data for {symbol}: {e}")
         return None
 
 def calculate_vwap(df):
@@ -527,9 +705,9 @@ def detect_price_action(df):
         return "NEUTRAL", 0
 
 def analyze_orb_ultimate(symbol, sector_perf, orb_mins=15):
-    df_5m = fetch_data(symbol, period="5d", interval="5m")
-    df_15m = fetch_data(symbol, period="10d", interval="15m")
-    df_daily = fetch_data(symbol, period="30d", interval="1d")
+    df_5m = fetch_data(symbol, period="5d", interval="5m", data_source=data_source, access_token=dhan_access_token)
+    df_15m = fetch_data(symbol, period="10d", interval="15m", data_source=data_source, access_token=dhan_access_token)
+    df_daily = fetch_data(symbol, period="30d", interval="1d", data_source=data_source, access_token=dhan_access_token)
     if df_5m is None or df_5m.empty:
         return None, "No 5m data"
     if 'Date' not in df_5m.columns:
