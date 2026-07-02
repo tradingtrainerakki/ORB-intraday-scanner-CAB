@@ -9,8 +9,22 @@ import json
 import os
 import hashlib
 import tempfile
+import pytz
 import warnings
 warnings.filterwarnings('ignore')
+
+# ============================================================
+# TIMEZONE SETUP - IST (Indian Standard Time)
+# ============================================================
+IST = pytz.timezone('Asia/Kolkata')
+
+def get_ist_now():
+    """Get current time in IST"""
+    return datetime.now(IST)
+
+def get_ist_date():
+    """Get current date in IST"""
+    return datetime.now(IST).date()
 
 # ============================================================
 # STREAMLIT CLOUD COMPATIBLE PATHS
@@ -21,8 +35,8 @@ DATA_FILE = os.path.join(TEMP_DIR, "scanner_data.json")
 # ============================================================
 # PASSWORD PROTECTION
 # ============================================================
-DEFAULT_USERNAME = "Akki"
-DEFAULT_PASSWORD = "Ca@1809"
+DEFAULT_USERNAME = "admin"
+DEFAULT_PASSWORD = "scanner123"
 
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
@@ -77,7 +91,7 @@ def save_scan_data(results, sector_perf, stock_list, settings):
         data = {
             'results': serializable_results,
             'sector_perf': sector_perf,
-            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'timestamp': get_ist_now().strftime('%Y-%m-%d %H:%M:%S'),
             'stock_list': stock_list,
             'settings': settings
         }
@@ -157,7 +171,7 @@ with st.sidebar:
     <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
                 padding: 15px; border-radius: 10px; color: white; text-align: center; margin-bottom: 20px;">
         <b>Welcome, {st.session_state.username}</b><br>
-        <small>{datetime.now().strftime('%d %b %Y | %H:%M')}</small>
+        <small>{get_ist_now().strftime('%d %b %Y | %H:%M')}</small>
     </div>
     """, unsafe_allow_html=True)
     if st.button("Logout", use_container_width=True):
@@ -820,7 +834,7 @@ def display_results(results, sector_perf):
     st.markdown("---")
     df_export = pd.DataFrame([{k: v for k, v in r.items() if k not in ['oi_data', 'news_data', 'filter_details']} for r in results])
     csv = df_export.to_csv(index=False)
-    st.download_button(label="Download Signals", data=csv, file_name=f"sector_scanner_{datetime.now().strftime('%Y%m%d_%H%M')}.csv", mime="text/csv")
+    st.download_button(label="Download Signals", data=csv, file_name=f"sector_scanner_{get_ist_now().strftime('%Y%m%d_%H%M')}.csv", mime="text/csv")
 
 # ============================================
 # MAIN LOGIC
