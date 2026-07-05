@@ -124,6 +124,84 @@ def save_journal(entries):
         json.dump(entries, f, indent=2)
 
 # ============================================================
+# NEWS DETECTION FUNCTION
+# ============================================================
+def check_stock_news(symbol):
+    """
+    Checks if a stock has recent news that could cause fake breakout.
+    Returns: (has_news, news_reason, risk_level)
+    risk_level: "LOW", "MEDIUM", "HIGH"
+    """
+    try:
+        # Method 1: Check via yfinance (earnings, splits, etc.)
+        ticker = yf.Ticker(symbol + ".NS")
+
+        # Get recent news
+        news_list = ticker.news if hasattr(ticker, 'news') else []
+
+        if news_list and len(news_list) > 0:
+            # Check if news is from today or yesterday
+            from datetime import datetime, timedelta
+            now = datetime.now()
+
+            for news in news_list[:3]:  # Check top 3 news
+                try:
+                    news_time = datetime.fromtimestamp(news.get('published', 0))
+                    hours_ago = (now - news_time).total_seconds() / 3600
+
+                    if hours_ago <= 24:  # News within 24 hours
+                        title = news.get('title', '').lower()
+                        publisher = news.get('publisher', '').lower()
+
+                        # High risk keywords
+                        high_risk_keywords = [
+                            'earnings', 'results', 'quarterly', 'q1', 'q2', 'q3', 'q4',
+                            'profit', 'loss', 'revenue', 'dividend', 'bonus', 'split',
+                            'merger', 'acquisition', 'buyout', 'takeover',
+                            'sebi', 'penalty', 'investigation', 'fraud',
+                            'bankruptcy', 'default', 'debt', 'restructuring',
+                            'ceo', 'md', 'resign', 'exit', 'fired',
+                            'block deal', 'bulk deal', 'insider trading'
+                        ]
+
+                        # Medium risk keywords
+                        medium_risk_keywords = [
+                            'order', 'contract', 'deal', 'partnership',
+                            'launch', 'product', 'approval', 'fda',
+                            'upgrade', 'downgrade', 'target price',
+                            'stake', 'holding', 'promoter', 'fii', 'dii'
+                        ]
+
+                        risk_level = "LOW"
+                        matched_keyword = ""
+
+                        for kw in high_risk_keywords:
+                            if kw in title:
+                                risk_level = "HIGH"
+                                matched_keyword = kw
+                                break
+
+                        if risk_level == "LOW":
+                            for kw in medium_risk_keywords:
+                                if kw in title:
+                                    risk_level = "MEDIUM"
+                                    matched_keyword = kw
+                                    break
+
+                        if risk_level in ["HIGH", "MEDIUM"]:
+                            return True, f"{matched_keyword.upper()} ({hours_ago:.0f}h ago)", risk_level
+                except:
+                    continue
+
+        # Method 2: Check NSE corporate announcements (simple check)
+        # This is a basic check - for production, use proper API
+
+        return False, "No recent news", "LOW"
+
+    except Exception as e:
+        return False, f"Error checking news: {str(e)}", "LOW"
+
+# ============================================================
 # NSE API FUNCTIONS
 # ============================================================
 NSE_HEADERS = {
@@ -337,6 +415,13 @@ def analyze_orb_clean(symbol, orb_mins=15):
         else:
             qty_pct = 50
 
+        # ===== NEWS CHECK =====
+        has_news, news_reason, news_risk = check_stock_news(symbol.replace('.NS', ''))
+
+        # If HIGH risk news, skip the stock
+        if news_risk == "HIGH":
+            return None  # Skip - news driven move = fake breakout risk
+
         return {
             'orb_high': round(orb_high, 2),
             'orb_low': round(orb_low, 2),
@@ -353,6 +438,9 @@ def analyze_orb_clean(symbol, orb_mins=15):
             'qty_pct': qty_pct,
             'is_retest': is_retest,
             'chg_pct': round(chg_pct, 2),
+            'has_news': has_news,
+            'news_reason': news_reason,
+            'news_risk': news_risk,
         }
     except Exception as e:
         return None
@@ -482,6 +570,7 @@ def get_merged_signal(ticker, oi_info, orb_data):
             "ATR%": f"{orb_atr_pct}%",
             "QTY": f"{orb_qty_pct}%",
             "SCORE": f"{score}%",
+            "NEWS": f"{orb_data.get('news_risk', 'LOW')}" if orb_data and orb_data.get('has_news') else "—",
             "SL": sl,
             "TARGET": tgt,
             "ORB_DATA": orb_data,
@@ -590,6 +679,12 @@ def color_pnl(val):
         if float(val) < 0: return 'color:#ff4060;font-weight:700'
     except: pass
     return ''
+
+def color_news(val):
+    v = str(val)
+    if 'HIGH' in v: return 'background:#ff000030;color:#ff2020;font-weight:700;'
+    if 'MEDIUM' in v: return 'background:#ffc70030;color:#ffc700;font-weight:700;'
+    return 'color:#00ff88;'
 
 def color_status(val):
     if val == "HIT TARGET": return 'color:#00ff88;font-weight:700'
@@ -839,7 +934,7 @@ with tab1:
         st.markdown("""
         <div style="color:#6a8aaa;font-size:11px;padding:10px 0;">
         📊 <b>STRATEGY:</b> ORB Breakout + OI Spurt Confirmation | Volume + VWAP + EMA Filters<br>
-        <span style="color:#ffc700;">⚡ 1% SL | 2% Target | Fake Breakout Protected | Best Time: 9:30-10:30 AM</span>
+        <span style="color:#ffc700;">⚡ 1% SL | 2% Target | News Filter ON | Fake Breakout Protected | Best Time: 9:30-10:30 AM</span>
         </div>
         """, unsafe_allow_html=True)
 
@@ -936,6 +1031,7 @@ with tab1:
                     .map(color_strength, subset=['SCORE'])
                     .map(color_ema, subset=['EMA'])
                     .map(color_chg, subset=['CHG %'])
+                    .map(color_news, subset=['NEWS'])
                     .set_properties(**{
                         'background-color': '#0d1219',
                         'color': '#c8d8e8',
