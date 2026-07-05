@@ -124,7 +124,7 @@ def save_journal(entries):
         json.dump(entries, f, indent=2)
 
 # ============================================================
-# NSE API FUNCTIONS (From Your Scanner)
+# NSE API FUNCTIONS
 # ============================================================
 NSE_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36",
@@ -189,16 +189,6 @@ def calculate_vwap(df):
     except:
         return None
 
-def calculate_rsi(df, period=14):
-    try:
-        delta = df['Close'].diff()
-        gain = delta.where(delta > 0, 0).rolling(window=period).mean()
-        loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
-        rs = gain / loss
-        return 100 - (100 / (1 + rs))
-    except:
-        return pd.Series([50] * len(df))
-
 def calculate_atr(df, period=14):
     try:
         df = df.copy()
@@ -210,39 +200,14 @@ def calculate_atr(df, period=14):
     except:
         return pd.Series([0] * len(df))
 
-def detect_price_action(df):
-    try:
-        if len(df) < 3:
-            return "NEUTRAL", 0
-        last = df.iloc[-1]
-        prev = df.iloc[-2]
-        prev2 = df.iloc[-3]
-        patterns = []
-
-        if prev['Close'] < prev['Open'] and last['Close'] > last['Open'] and last['Open'] < prev['Close'] and last['Close'] > prev['Open']:
-            patterns.append(("Bullish Engulfing", 2))
-        elif prev['Close'] > prev['Open'] and last['Close'] < last['Open'] and last['Open'] > prev['Close'] and last['Close'] < prev['Open']:
-            patterns.append(("Bearish Engulfing", -2))
-
-        if last['Close'] > last['Open'] and (last['Low'] - min(last['Open'], last['Close'])) > 2 * abs(last['Close'] - last['Open']):
-            patterns.append(("Hammer", 1))
-
-        if not patterns:
-            return "NEUTRAL", 0
-
-        score = sum(p[1] for p in patterns)
-        if score >= 2:
-            return "BULLISH", score
-        elif score <= -2:
-            return "BEARISH", abs(score)
-        return "NEUTRAL", 0
-    except:
-        return "NEUTRAL", 0
-
 # ============================================================
-# ORB ANALYSIS (From My Scanner)
+# ORB ANALYSIS - CLEAN VERSION
 # ============================================================
-def analyze_orb_ultimate(symbol, orb_mins=15, min_accuracy=60):
+def analyze_orb_clean(symbol, orb_mins=15):
+    """
+    Clean ORB analysis with fake breakout protection
+    Returns: dict with signal or None
+    """
     try:
         df_5m = yf.download(symbol + ".NS", period="5d", interval="5m", progress=False)
         if len(df_5m) < 20:
@@ -260,18 +225,24 @@ def analyze_orb_ultimate(symbol, orb_mins=15, min_accuracy=60):
         today = get_ist_date()
         df_today = df_5m[df_5m['Date'].dt.date == today].copy()
 
-        if df_today.empty or len(df_today) < 3:
+        if df_today.empty or len(df_today) < 4:
             return None
 
         df_today = df_today.sort_values('Date')
         candles_needed = max(1, orb_mins // 5)
         opening_range = df_today.head(candles_needed)
 
-        orb_high = opening_range['High'].max()
-        orb_low = opening_range['Low'].min()
-        current_candle = df_today.iloc[-1]
-        current_price = current_candle['Close']
+        orb_high = float(opening_range['High'].max())
+        orb_low = float(opening_range['Low'].min())
+        orb_range = orb_high - orb_low
 
+        current_candle = df_today.iloc[-1]
+        current_price = float(current_candle['Close'])
+        current_open = float(current_candle['Open'])
+        current_high = float(current_candle['High'])
+        current_low = float(current_candle['Low'])
+
+        # ===== ORB BREAKOUT DETECTION =====
         if current_price > orb_high:
             base_signal = "BUY"
             entry_price = orb_high
@@ -281,77 +252,71 @@ def analyze_orb_ultimate(symbol, orb_mins=15, min_accuracy=60):
             entry_price = orb_low
             stop_loss = orb_high
         else:
-            return None
+            return None  # No breakout
 
-        # Filters
-        filters_passed = 1
-        total_filters = 1
-        filter_details = [("ORB Breakout", True, f"Price broke {base_signal}")]
+        # ===== FAKE BREAKOUT CHECKS (3 Simple Rules) =====
 
-        # Volume
-        total_filters += 1
+        # Rule 1: Volume must be 1.2x+ average
         avg_volume = df_today['Volume'].rolling(window=5).mean().iloc[-1]
-        volume_ratio = current_candle['Volume'] / avg_volume if avg_volume > 0 else 0
-        volume_pass = volume_ratio >= 1.3
-        if volume_pass:
-            filters_passed += 1
-        filter_details.append((f"{'Pass' if volume_pass else 'Fail'} Volume", volume_pass, f"{volume_ratio:.1f}x"))
+        volume_ratio = float(current_candle['Volume']) / float(avg_volume) if avg_volume > 0 else 0
+        if volume_ratio < 1.2:
+            return None  # Low volume = Fake
 
-        # VWAP
-        total_filters += 1
+        # Rule 2: Candle body should be strong (not just wick)
+        body = abs(current_price - current_open)
+        candle_range = current_high - current_low
+        if candle_range > 0 and (body / candle_range) < 0.4:
+            return None  # Small body, big wick = Fake
+
+        # Rule 3: Price should CLOSE beyond ORB level (not just touch)
+        if base_signal == "BUY" and current_price < orb_high * 1.002:
+            return None  # Just touched, didn't close above
+        if base_signal == "SELL" and current_price > orb_low * 0.998:
+            return None  # Just touched, didn't close below
+
+        # ===== RETEST CHECK (If already moved 2%+) =====
+        prev_close = float(df_5m[df_5m['Date'].dt.date < today]['Close'].iloc[-1]) if len(df_5m[df_5m['Date'].dt.date < today]) > 0 else orb_low
+        chg_pct = ((current_price - prev_close) / prev_close) * 100 if prev_close > 0 else 0
+
+        is_retest = False
+        if abs(chg_pct) >= 2.0:
+            half_range = orb_range * 0.5
+            if base_signal == "BUY" and current_price >= (orb_high - half_range):
+                is_retest = True  # Retesting ORB high
+            elif base_signal == "SELL" and current_price <= (orb_low + half_range):
+                is_retest = True  # Retesting ORB low
+            else:
+                return None  # Moved 2%+ but not retesting = Skip
+
+        # ===== CONFIRMATION FILTERS (Only 2) =====
+
+        # Filter 1: VWAP
         vwap_series = calculate_vwap(df_today)
-        vwap = vwap_series.iloc[-1] if vwap_series is not None else None
+        vwap = float(vwap_series.iloc[-1]) if vwap_series is not None else None
+        vwap_pass = False
         if vwap:
             if base_signal == "BUY" and current_price > vwap:
-                filters_passed += 1
                 vwap_pass = True
             elif base_signal == "SELL" and current_price < vwap:
-                filters_passed += 1
                 vwap_pass = True
-            else:
-                vwap_pass = False
-            filter_details.append((f"{'Pass' if vwap_pass else 'Fail'} VWAP", vwap_pass, f"Rs{vwap:.2f}"))
 
-        # RSI
-        total_filters += 1
-        rsi = calculate_rsi(df_today).iloc[-1]
-        if base_signal == "BUY" and rsi < 75:
-            filters_passed += 1
-            rsi_pass = True
-        elif base_signal == "SELL" and rsi > 25:
-            filters_passed += 1
-            rsi_pass = True
-        else:
-            rsi_pass = False
-        filter_details.append((f"{'Pass' if rsi_pass else 'Fail'} RSI", rsi_pass, f"{rsi:.1f}"))
+        if not vwap_pass:
+            return None  # VWAP against = No trade
 
-        # Price Action
-        total_filters += 1
-        pa_signal, pa_strength = detect_price_action(df_today)
-        if (base_signal == "BUY" and pa_signal == "BULLISH") or (base_signal == "SELL" and pa_signal == "BEARISH"):
-            filters_passed += 1
-            pa_pass = True
-        else:
-            pa_pass = False
-        filter_details.append((f"{'Pass' if pa_pass else 'Fail'} Price Action", pa_pass, f"{pa_signal}"))
-
-        # EMA
-        total_filters += 1
-        ema20 = ema(df_5m['Close'], 20).iloc[-1]
+        # Filter 2: EMA20
+        ema20 = float(ema(df_5m['Close'], 20).iloc[-1])
+        ema_pass = False
         if base_signal == "BUY" and current_price > ema20:
-            filters_passed += 1
             ema_pass = True
         elif base_signal == "SELL" and current_price < ema20:
-            filters_passed += 1
             ema_pass = True
-        else:
-            ema_pass = False
-        filter_details.append((f"{'Pass' if ema_pass else 'Fail'} EMA20", ema_pass, f"Rs{ema20:.2f}"))
 
-        accuracy = (filters_passed / total_filters) * 100 if total_filters > 0 else 0
+        if not ema_pass:
+            return None  # EMA against = No trade
 
-        # ATR SL
-        atr = calculate_atr(df_today).iloc[-1]
+        # ===== ATR-BASED SL/TARGET =====
+        atr = float(calculate_atr(df_today).iloc[-1])
+
         if atr > 0:
             if base_signal == "BUY":
                 atr_sl = entry_price - (1.5 * atr)
@@ -361,11 +326,16 @@ def analyze_orb_ultimate(symbol, orb_mins=15, min_accuracy=60):
                 stop_loss = min(stop_loss, atr_sl)
 
         risk = abs(entry_price - stop_loss)
-        target = entry_price + (risk * 2.5) if base_signal == "BUY" else entry_price - (risk * 2.5)
+        target = entry_price + (risk * 2.0) if base_signal == "BUY" else entry_price - (risk * 2.0)
 
-        # Min accuracy filter
-        if accuracy < min_accuracy:
-            return None
+        # Position sizing based on ATR
+        atr_pct = (atr / current_price * 100) if current_price > 0 else 0
+        if atr_pct < 1.0:
+            qty_pct = 100
+        elif atr_pct < 2.0:
+            qty_pct = 70
+        else:
+            qty_pct = 50
 
         return {
             'orb_high': round(orb_high, 2),
@@ -375,16 +345,16 @@ def analyze_orb_ultimate(symbol, orb_mins=15, min_accuracy=60):
             'stop_loss': round(stop_loss, 2),
             'target': round(target, 2),
             'risk': round(risk, 2),
-            'accuracy': round(accuracy, 1),
-            'filters_passed': filters_passed,
-            'total_filters': total_filters,
-            'filter_details': filter_details,
-            'rsi': round(rsi, 1),
             'vwap': round(vwap, 2) if vwap else None,
             'atr': round(atr, 2),
+            'atr_pct': round(atr_pct, 2),
             'ema20': round(ema20, 2),
+            'volume_ratio': round(volume_ratio, 1),
+            'qty_pct': qty_pct,
+            'is_retest': is_retest,
+            'chg_pct': round(chg_pct, 2),
         }
-    except:
+    except Exception as e:
         return None
 
 # ============================================================
@@ -424,11 +394,6 @@ def get_merged_signal(ticker, oi_info, orb_data):
         if abs(gap_pct) >= 2.0:
             return None
 
-        # VWAP
-        v = today_data['Volume']
-        p = (today_data['High'] + today_data['Low'] + today_data['Close']) / 3
-        vwap = float((p * v).cumsum().iloc[-1] / v.cumsum().iloc[-1])
-
         # EMA
         ema9 = float(ema(df['Close'], 9).iloc[-1])
         ema21 = float(ema(df['Close'], 21).iloc[-1])
@@ -455,89 +420,69 @@ def get_merged_signal(ticker, oi_info, orb_data):
 
         # ORB data
         orb_signal = orb_data.get('signal', 'NEUTRAL') if orb_data else 'NEUTRAL'
-        orb_accuracy = orb_data.get('accuracy', 0) if orb_data else 0
         orb_atr_pct = orb_data.get('atr_pct', 0) if orb_data else 0
         orb_qty_pct = orb_data.get('qty_pct', 100) if orb_data else 100
+        is_retest = orb_data.get('is_retest', False) if orb_data else False
 
-        # ===== SIMPLIFIED SCORING (Max Real Trades) =====
+        # ===== SCORING (Simple 0-100) =====
         score = 0
 
-        # 1. OI Spurt Score (0-25) - Lower threshold for more signals
-        if oi_pct > 3: score += 25
+        # OI Score (0-30)
+        if oi_pct > 5: score += 30
+        elif oi_pct > 3: score += 25
         elif oi_pct > 1.5: score += 20
         elif oi_pct > 0.5: score += 15
         elif oi_pct > 0: score += 10
 
-        # 2. ORB Score (0-25) - Direction based
+        # ORB Score (0-30)
         if orb_signal == "BUY":
-            if orb_accuracy >= 80: score += 25
-            elif orb_accuracy >= 60: score += 20
-            else: score += 10
+            score += 30
         elif orb_signal == "SELL":
-            if orb_accuracy >= 80: score += 0
-            elif orb_accuracy >= 60: score += 5
-            else: score += 10
+            score += 0  # Sell signals get lower score
 
-        # 3. Technical Score (0-30) - Simple 3 checks
-        if cp > vwap: score += 10
-        if ema9 > ema21: score += 10
-        if vol_ratio > 1.0: score += 10
+        # EMA Score (0-20)
+        if ema9 > ema21: score += 20
+        elif ema9 > ema21 * 0.998: score += 10
 
-        # 4. ATR/Volatility Bonus (0-10) - Calm stocks get bonus
-        if orb_atr_pct < 1.0: score += 10
-        elif orb_atr_pct < 1.5: score += 5
+        # Volume Score (0-10)
+        if vol_ratio > 1.5: score += 10
+        elif vol_ratio > 1.2: score += 5
 
-        # 5. Trend Alignment (0-10)
-        if orb_signal == "BUY" and oi_interp in ["LONG BUILD", "SHORT COVER"]:
-            score += 10
-        elif orb_signal == "SELL" and oi_interp in ["SHORT BUILD", "LONG UNWIND"]:
-            score += 10
+        # Retest Bonus (0-10)
+        if is_retest: score += 10
 
-        # ===== SIGNAL GENERATION (More Lenient) =====
-        if score >= 70: signal = "STRONG BUY"
-        elif score >= 50: signal = "BUY"
-        elif score <= 30: signal = "STRONG SELL"
-        elif score <= 45: signal = "SELL"
+        # SIGNAL
+        if score >= 75: signal = "STRONG BUY"
+        elif score >= 55: signal = "BUY"
+        elif score <= 25: signal = "STRONG SELL"
+        elif score <= 40: signal = "SELL"
         else: signal = "WAIT"
 
-        # ===== ATR-BASED SL/TARGET (Dynamic) =====
-        if orb_data and orb_data.get('atr'):
-            atr = orb_data['atr']
-            if "BUY" in signal:
-                sl = round(cp - (1.5 * atr), 2)
-                tgt = round(cp + (3 * atr), 2)
-            elif "SELL" in signal:
-                sl = round(cp + (1.5 * atr), 2)
-                tgt = round(cp - (3 * atr), 2)
-            else:
-                sl = "-"
-                tgt = "-"
+        # SL/Target - Fixed 1% SL, 2% Target
+        if "BUY" in signal:
+            sl = round(cp * 0.99, 2)
+            tgt = round(cp * 1.02, 2)
+        elif "SELL" in signal:
+            sl = round(cp * 1.01, 2)
+            tgt = round(cp * 0.98, 2)
         else:
-            if "BUY" in signal:
-                sl = round(cp * 0.995, 2)
-                tgt = round(cp * 1.02, 2)
-            elif "SELL" in signal:
-                sl = round(cp * 1.005, 2)
-                tgt = round(cp * 0.98, 2)
-            else:
-                sl = "-"
-                tgt = "-"
+            sl = "-"
+            tgt = "-"
 
         return {
             "STOCK": ticker,
             "OI SPURT %": f"{'+' if oi_pct >= 0 else ''}{oi_pct:.2f}%",
             "OI SIGNAL": oi_interp,
-            "ORB": f"{orb_signal} ({orb_accuracy}%)",
+            "ORB": orb_signal,
             "LTP": round(cp, 2),
             "CHG %": f"{'+' if chg >= 0 else ''}{chg}%",
             "SIGNAL": signal,
-            "VWAP": "ABOVE" if cp > vwap else "BELOW",
-            "EMA TREND": "BULLISH" if ema9 > ema21 else "BEARISH",
-            "VOL RATIO": f"{vol_ratio}x",
-            "ATR %": f"{orb_atr_pct}%",
+            "EMA": "BULLISH" if ema9 > ema21 else "BEARISH",
+            "VOL": f"{vol_ratio}x",
+            "ATR%": f"{orb_atr_pct}%",
             "QTY": f"{orb_qty_pct}%",
-            "STRENGTH": f"{score}%",
-            "STOP LOSS": sl,
+            "SCORE": f"{score}%",
+            "SL": sl,
             "TARGET": tgt,
             "ORB_DATA": orb_data,
         }
@@ -612,8 +557,8 @@ def color_signal(val):
 def color_strength(val):
     try:
         v = int(str(val).replace("%",""))
-        if v >= 80: return "background:#00ff0025;color:#00ff00;font-weight:700;"
-        if v >= 60: return "background:#88ff0015;color:#88ff00;font-weight:700;"
+        if v >= 75: return "background:#00ff0025;color:#00ff00;font-weight:700;"
+        if v >= 55: return "background:#88ff0015;color:#88ff00;font-weight:700;"
         if v >= 40: return "background:#ffc70020;color:#ffc700;font-weight:700;"
         return "background:#ff406020;color:#ff4060;font-weight:700;"
     except: return ""
@@ -621,19 +566,6 @@ def color_strength(val):
 def color_ema(val):
     if "BULLISH" in str(val): return 'color:#00ff88;font-weight:700'
     if "BEARISH" in str(val): return 'color:#ff4060;font-weight:700'
-    return ''
-
-def color_vwap(val):
-    if "ABOVE" in str(val): return 'color:#00ff88'
-    if "BELOW" in str(val): return 'color:#ff4060'
-    return ''
-
-def color_chg(val):
-    try:
-        v = float(str(val).replace('%','').replace('+',''))
-        if v > 0: return 'color:#00ff88;font-weight:700'
-        if v < 0: return 'color:#ff4060;font-weight:700'
-    except: pass
     return ''
 
 def color_oi(val):
@@ -669,7 +601,7 @@ def color_status(val):
 # PAGE CONFIG & LOGIN
 # ============================================================
 st.set_page_config(
-    page_title="F&O Pro Scanner - Merged",
+    page_title="F&O Pro Scanner",
     page_icon="📈",
     layout="wide",
     initial_sidebar_state="collapsed"
@@ -819,7 +751,7 @@ if not st.session_state.authenticated:
                     -webkit-background-clip:text;-webkit-text-fill-color:transparent;">
             📈 F&O PRO SCANNER
         </div>
-        <div style="color:#3a5a7a;font-size:10px;letter-spacing:3px;margin-bottom:24px;">NSE · INTRADAY · LIVE · MERGED</div>
+        <div style="color:#3a5a7a;font-size:10px;letter-spacing:3px;margin-bottom:24px;">NSE · INTRADAY · PROFIT FOCUSED</div>
     </div>
     """, unsafe_allow_html=True)
     col1, col2, col3 = st.columns([1, 2, 1])
@@ -846,7 +778,7 @@ st.markdown(f"""
   <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;">
     <div>
       <div class="logo-text">📈 F&O PRO SCANNER</div>
-      <div class="logo-sub">NSE · Intraday · Live OI Spurts + ORB Breakout + EMA + VWAP</div>
+      <div class="logo-sub">NSE · Intraday · ORB Strategy · Fake Breakout Protected</div>
     </div>
     <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap;">
       <div style="color:#3a5a7a;font-size:11px;">⏰ {now_str}</div>
@@ -875,7 +807,6 @@ with st.sidebar:
     st.markdown("### Scanner Settings")
 
     orb_minutes = st.slider("ORB Opening Range (minutes)", 5, 30, 15)
-    min_accuracy = st.slider("Min ORB Accuracy %", 50, 100, 60)
 
     st.markdown("---")
 
@@ -894,10 +825,10 @@ with st.sidebar:
         """, unsafe_allow_html=True)
 
 # Tabs
-tab1, tab2, tab3, tab4 = st.tabs(["  📡  MERGED SCANNER  ", "  📊  CHART VIEW  ", "  📓  TRADE JOURNAL  ", "  📋  ORB DETAILS  "])
+tab1, tab2, tab3 = st.tabs(["  📡  SCANNER  ", "  📊  CHART  ", "  📓  JOURNAL  "])
 
 # ============================================================
-# TAB 1 - MERGED SCANNER
+# TAB 1 - SCANNER
 # ============================================================
 with tab1:
     col_btn, col_info = st.columns([1, 3])
@@ -907,8 +838,8 @@ with tab1:
     with col_info:
         st.markdown("""
         <div style="color:#6a8aaa;font-size:11px;padding:10px 0;">
-        📊 <b>MERGED STRATEGY:</b> OI Spurt (Early Signal) + ORB Breakout (Confirmation) + EMA/VWAP Filters<br>
-        <span style="color:#ffc700;">⚡ Gap Filter ON | Auto-Save ON | Sleep Mode Safe</span>
+        📊 <b>STRATEGY:</b> ORB Breakout + OI Spurt Confirmation | Volume + VWAP + EMA Filters<br>
+        <span style="color:#ffc700;">⚡ 1% SL | 2% Target | Fake Breakout Protected | Best Time: 9:30-10:30 AM</span>
         </div>
         """, unsafe_allow_html=True)
 
@@ -919,7 +850,7 @@ with tab1:
         if not oi_list:
             st.error("NSE OI data nahi mila — market band hai ya connection issue")
         else:
-            st.markdown(f'<div class="section-header">📋 Top {len(oi_list)} OI Spurt Stocks + ORB Analysis</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="section-header">📋 Top {len(oi_list)} OI Spurt Stocks</div>', unsafe_allow_html=True)
 
             # OI Preview
             oi_preview = pd.DataFrame([{
@@ -933,7 +864,7 @@ with tab1:
             with st.expander("📊 NSE OI Spurt Raw Data", expanded=False):
                 st.dataframe(oi_preview, use_container_width=True, hide_index=True)
 
-            # Merged Analysis
+            # ORB Analysis
             results = []
             skipped = []
             progress = st.progress(0)
@@ -948,10 +879,7 @@ with tab1:
                     unsafe_allow_html=True
                 )
 
-                # Get ORB data
-                orb_data = analyze_orb_ultimate(ticker + ".NS", orb_minutes, min_accuracy)
-
-                # Get merged signal
+                orb_data = analyze_orb_clean(ticker + ".NS", orb_minutes)
                 merged_data = get_merged_signal(ticker, oi_item, orb_data)
 
                 if merged_data:
@@ -968,13 +896,12 @@ with tab1:
                 st.markdown(
                     f'<div style="background:#ffc70015;border:1px solid #ffc70040;border-radius:8px;'
                     f'padding:10px;color:#ffc700;font-size:11px;margin-bottom:12px;">'
-                    f'⚡ Skipped: {", ".join(skipped)}</div>',
+                    f'⚡ Filtered Out: {", ".join(skipped)}</div>',
                     unsafe_allow_html=True
                 )
 
             if results:
                 save_scan_data(results, oi_list)
-
                 df_result = pd.DataFrame(results)
                 st.session_state['scan_results'] = results
                 st.session_state['oi_list'] = oi_list
@@ -983,14 +910,13 @@ with tab1:
                 sell_c = len(df_result[df_result['SIGNAL'].str.contains('SELL')])
                 wait_c = len(df_result[df_result['SIGNAL'].str.contains('WAIT')])
 
-                c1, c2, c3, c4, c5 = st.columns(5)
+                c1, c2, c3, c4 = st.columns(4)
                 c1.metric("Total Found", len(df_result))
-                c2.metric("Strong Buy", buy_c)
-                c3.metric("Sell", sell_c)
-                c4.metric("Wait", wait_c)
-                c5.metric("Scanned At", get_ist_now().strftime("%H:%M:%S"))
+                c2.metric("Buy Signals", buy_c)
+                c3.metric("Sell Signals", sell_c)
+                c4.metric("Scanned At", get_ist_now().strftime("%H:%M:%S"))
 
-                st.markdown('<div class="section-header">📈 Merged Results — OI + ORB + Technicals</div>', unsafe_allow_html=True)
+                st.markdown('<div class="section-header">📈 Trade Signals — 1% SL | 2% Target</div>', unsafe_allow_html=True)
 
                 f1, f2 = st.columns([1, 3])
                 show_filter = f1.selectbox("Filter", ["All", "Strong Buy", "Buy", "Sell", "Wait"])
@@ -999,18 +925,16 @@ with tab1:
                 if show_filter != "All":
                     df_show = df_show[df_show['SIGNAL'].str.contains(show_filter.upper().replace(' ', ' '))]
 
-                # Display columns
                 display_cols = ['STOCK', 'OI SPURT %', 'OI SIGNAL', 'ORB', 'LTP', 'CHG %', 'SIGNAL', 
-                               'VWAP', 'EMA TREND', 'VOL RATIO', 'STRENGTH', 'STOP LOSS', 'TARGET']
+                               'EMA', 'VOL', 'ATR%', 'QTY', 'SCORE', 'SL', 'TARGET']
 
                 styled = (
                     df_show[display_cols].style
                     .map(color_oi, subset=['OI SPURT %'])
                     .map(color_oi_interp, subset=['OI SIGNAL'])
                     .map(color_signal, subset=['SIGNAL'])
-                    .map(color_strength, subset=['STRENGTH'])
-                    .map(color_ema, subset=['EMA TREND'])
-                    .map(color_vwap, subset=['VWAP'])
+                    .map(color_strength, subset=['SCORE'])
+                    .map(color_ema, subset=['EMA'])
                     .map(color_chg, subset=['CHG %'])
                     .set_properties(**{
                         'background-color': '#0d1219',
@@ -1026,11 +950,11 @@ with tab1:
                 st.download_button(
                     label="📥 CSV Download",
                     data=csv,
-                    file_name=f"merged_scan_{get_ist_now().strftime('%d%m%Y_%H%M')}.csv",
+                    file_name=f"scan_{get_ist_now().strftime('%d%m%Y_%H%M')}.csv",
                     mime='text/csv',
                 )
             else:
-                st.warning("Koi signal nahi mila")
+                st.warning("Koi signal nahi mila — 9:30-10:30 AM try karo")
 
     elif 'scan_results' in st.session_state:
         st.info("💡 Pichli scan ke results dikh rahe hain")
@@ -1040,12 +964,12 @@ with tab1:
             .map(color_oi, subset=['OI SPURT %'])
             .map(color_oi_interp, subset=['OI SIGNAL'])
             .map(color_signal, subset=['SIGNAL'])
-            .map(color_strength, subset=['STRENGTH'])
+            .map(color_strength, subset=['SCORE'])
         )
         st.dataframe(styled, use_container_width=True, height=520)
 
 # ============================================================
-# TAB 2 - CHART VIEW
+# TAB 2 - CHART
 # ============================================================
 with tab2:
     st.markdown('<div class="section-header">📊 Candlestick Chart — EMA + VWAP</div>', unsafe_allow_html=True)
@@ -1080,7 +1004,7 @@ with tab2:
             st.error("Data nahi mila")
 
 # ============================================================
-# TAB 3 - TRADE JOURNAL
+# TAB 3 - JOURNAL
 # ============================================================
 with tab3:
     st.markdown('<div class="section-header">📓 Trade Journal</div>', unsafe_allow_html=True)
@@ -1141,63 +1065,11 @@ with tab3:
     else:
         st.info("No entries yet")
 
-# ============================================================
-# TAB 4 - ORB DETAILS
-# ============================================================
-with tab4:
-    st.markdown('<div class="section-header">📋 ORB Breakout Details</div>', unsafe_allow_html=True)
-
-    if 'scan_results' in st.session_state:
-        results = st.session_state['scan_results']
-        for r in results:
-            if r.get('ORB_DATA'):
-                orb = r['ORB_DATA']
-                with st.expander(f"{r['STOCK']} — {r['SIGNAL']}"):
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        st.markdown(f"""
-                        <div style="background:#0d1219;border:1px solid #1e2d3d;border-radius:8px;padding:15px;">
-                        <b>ORB Levels</b><br>
-                        High: Rs{orb['orb_high']}<br>
-                        Low: Rs{orb['orb_low']}<br>
-                        Signal: {orb['signal']}<br>
-                        Accuracy: {orb['accuracy']}%
-                        </div>
-                        """, unsafe_allow_html=True)
-                    with col2:
-                        st.markdown(f"""
-                        <div style="background:#0d1219;border:1px solid #1e2d3d;border-radius:8px;padding:15px;">
-                        <b>Trade</b><br>
-                        Entry: Rs{orb['entry_price']}<br>
-                        SL: Rs{orb['stop_loss']}<br>
-                        Target: Rs{orb['target']}<br>
-                        Risk: Rs{orb['risk']}
-                        </div>
-                        """, unsafe_allow_html=True)
-                    with col3:
-                        st.markdown(f"""
-                        <div style="background:#0d1219;border:1px solid #1e2d3d;border-radius:8px;padding:15px;">
-                        <b>Tech</b><br>
-                        VWAP: Rs{orb['vwap']}<br>
-                        ATR: Rs{orb['atr']}<br>
-                        ATR%: {orb['atr_pct']}%<br>
-                        EMA20: Rs{orb['ema20']}<br>
-                        Vol: {orb['volume_ratio']}x
-                        </div>
-                        """, unsafe_allow_html=True)
-
-                    st.markdown("**Filters:**")
-                    for name, passed, detail in orb['filter_details']:
-                        color = "#00ff88" if passed else "#ff4060"
-                        st.markdown(f'<span style="color:{color}">●</span> {name} — {detail}')
-    else:
-        st.info("Pehle scan karo — ORB details yahan dikhenge")
-
 st.markdown("---")
 st.markdown("""
 <div style="text-align:center;color:#3a5a7a;font-size:11px;">
-<b>F&O Pro Scanner — Merged Edition</b> | OI Spurts + ORB Breakout + EMA + VWAP<br>
-Educational purposes only. Not financial advice.<br>
-Secure Login | Auto-Save | Sleep Mode Safe
+<b>F&O Pro Scanner — Profit Focused Edition</b> | ORB Strategy | 1% SL | 2% Target<br>
+Fake Breakout Protected | Educational purposes only. Not financial advice.<br>
+Best Time: 9:30-10:30 AM IST
 </div>
 """, unsafe_allow_html=True)
