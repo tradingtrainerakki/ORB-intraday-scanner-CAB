@@ -150,59 +150,65 @@ def get_dhan_security_id(symbol_ns):
 def fetch_nsepython_data(symbol, period="5d", interval="5m"):
     """Fetch data using NSEPython library"""
     try:
-        from nsepythonserver import equity_history
+        from nsepythonserver import equity_intraday, equity_history
         from datetime import datetime, timedelta
 
         symbol_clean = symbol.replace('.NS', '')
 
-        # Calculate date range
-        end_date = get_ist_now().strftime('%d-%m-%Y')
-        days_map = {"1d": 1, "5d": 5, "10d": 10, "30d": 30, "90d": 90}
-        days = days_map.get(period, 5)
-        start_date = (get_ist_now() - timedelta(days=days)).strftime('%d-%m-%Y')
+        # For intraday data, use equity_intraday
+        # For daily data, use equity_history
+        if interval in ["1m", "5m", "15m", "30m", "60m"]:
+            # Intraday data
+            df = equity_intraday(symbol_clean, "EQ")
 
-        # Fetch data using NSEPython
-        df = equity_history(symbol_clean, "EQ", start_date, end_date)
+            if df is None or df.empty:
+                return None
 
-        if df is None or df.empty:
-            return None
+            # equity_intraday returns: timestamp, open, high, low, close, volume
+            clean_df = pd.DataFrame()
 
-        # NSEPython returns columns: CH_SYMBOL, CH_SERIES, CH_MARKET_TYPE, CH_TIMESTAMP, 
-        # CH_OPENING_PRICE, CH_TRADE_HIGH_PRICE, CH_TRADE_LOW_PRICE, CH_CLOSING_PRICE, 
-        # CH_LAST_TRADED_PRICE, CH_PREVIOUS_CLS_PRICE, CH_TOT_TRADED_QTY, etc.
+            if 'timestamp' in df.columns:
+                clean_df['Date'] = pd.to_datetime(df['timestamp'], unit='s')
+            elif 'Timestamp' in df.columns:
+                clean_df['Date'] = pd.to_datetime(df['Timestamp'], unit='s')
 
-        # Create clean dataframe
-        clean_df = pd.DataFrame()
+            for col in ['open', 'high', 'low', 'close', 'volume']:
+                if col in df.columns:
+                    clean_df[col.capitalize()] = pd.to_numeric(df[col], errors='coerce')
 
-        # Handle Date column
-        if 'CH_TIMESTAMP' in df.columns:
-            clean_df['Date'] = pd.to_datetime(df['CH_TIMESTAMP'])
-        elif 'TIMESTAMP' in df.columns:
-            clean_df['Date'] = pd.to_datetime(df['TIMESTAMP'])
-        elif 'DATE' in df.columns:
-            clean_df['Date'] = pd.to_datetime(df['DATE'])
+            return clean_df
+        else:
+            # Daily data
+            end_date = get_ist_now().strftime('%d-%m-%Y')
+            days_map = {"1d": 1, "5d": 5, "10d": 10, "30d": 30, "90d": 90}
+            days = days_map.get(period, 5)
+            start_date = (get_ist_now() - timedelta(days=days)).strftime('%d-%m-%Y')
 
-        # Map NSEPython columns to standard format
-        col_map = {
-            'Open': ['CH_OPENING_PRICE', 'OPEN', 'open', 'Open'],
-            'High': ['CH_TRADE_HIGH_PRICE', 'HIGH', 'high', 'High'],
-            'Low': ['CH_TRADE_LOW_PRICE', 'LOW', 'low', 'Low'],
-            'Close': ['CH_CLOSING_PRICE', 'CLOSE', 'close', 'Close'],
-            'Volume': ['CH_TOT_TRADED_QTY', 'VOLUME', 'volume', 'Volume', 'TOTTRDQTY']
-        }
+            df = equity_history(symbol_clean, "EQ", start_date, end_date)
 
-        for target_col, possible_names in col_map.items():
-            found = False
-            for name in possible_names:
-                if name in df.columns:
-                    clean_df[target_col] = pd.to_numeric(df[name], errors='coerce')
-                    found = True
-                    break
-            if not found:
-                st.warning(f"Column {target_col} not found in NSEPython data for {symbol}")
-                clean_df[target_col] = 0
+            if df is None or df.empty:
+                return None
 
-        return clean_df
+            clean_df = pd.DataFrame()
+
+            if 'CH_TIMESTAMP' in df.columns:
+                clean_df['Date'] = pd.to_datetime(df['CH_TIMESTAMP'])
+
+            col_map = {
+                'Open': ['CH_OPENING_PRICE', 'OPEN', 'open'],
+                'High': ['CH_TRADE_HIGH_PRICE', 'HIGH', 'high'],
+                'Low': ['CH_TRADE_LOW_PRICE', 'LOW', 'low'],
+                'Close': ['CH_CLOSING_PRICE', 'CLOSE', 'close'],
+                'Volume': ['CH_TOT_TRADED_QTY', 'VOLUME', 'volume']
+            }
+
+            for target_col, possible_names in col_map.items():
+                for name in possible_names:
+                    if name in df.columns:
+                        clean_df[target_col] = pd.to_numeric(df[name], errors='coerce')
+                        break
+
+            return clean_df
     except ImportError:
         st.warning("NSEPython not installed. Install with: pip install nsepythonserver")
         return None
