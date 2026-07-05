@@ -128,78 +128,85 @@ def save_journal(entries):
 # ============================================================
 def check_stock_news(symbol):
     """
-    Checks if a stock has recent news that could cause fake breakout.
-    Returns: (has_news, news_reason, risk_level)
+    Checks if a stock has recent news.
+    Returns: (has_news, news_reason, risk_level, news_type)
     risk_level: "LOW", "MEDIUM", "HIGH"
+    news_type: "POSITIVE", "NEGATIVE", "NEUTRAL", "VOLATILE"
     """
     try:
-        # Method 1: Check via yfinance (earnings, splits, etc.)
         ticker = yf.Ticker(symbol + ".NS")
-
-        # Get recent news
         news_list = ticker.news if hasattr(ticker, 'news') else []
 
         if news_list and len(news_list) > 0:
-            # Check if news is from today or yesterday
-            from datetime import datetime, timedelta
             now = datetime.now()
 
-            for news in news_list[:3]:  # Check top 3 news
+            for news in news_list[:3]:
                 try:
                     news_time = datetime.fromtimestamp(news.get('published', 0))
                     hours_ago = (now - news_time).total_seconds() / 3600
 
-                    if hours_ago <= 24:  # News within 24 hours
+                    if hours_ago <= 24:
                         title = news.get('title', '').lower()
-                        publisher = news.get('publisher', '').lower()
 
-                        # High risk keywords
-                        high_risk_keywords = [
+                        # ===== NEGATIVE / VOLATILE NEWS (SKIP) =====
+                        negative_keywords = [
                             'earnings', 'results', 'quarterly', 'q1', 'q2', 'q3', 'q4',
-                            'profit', 'loss', 'revenue', 'dividend', 'bonus', 'split',
-                            'merger', 'acquisition', 'buyout', 'takeover',
-                            'sebi', 'penalty', 'investigation', 'fraud',
-                            'bankruptcy', 'default', 'debt', 'restructuring',
-                            'ceo', 'md', 'resign', 'exit', 'fired',
-                            'block deal', 'bulk deal', 'insider trading'
+                            'loss', 'net loss', 'decline in profit',
+                            'sebi', 'penalty', 'investigation', 'fraud', 'show cause',
+                            'bankruptcy', 'default', 'debt crisis', 'restructuring',
+                            'ceo resign', 'md resign', 'director resign', 'exit',
+                            'downgrade', 'sell rating', 'reduce rating',
+                            'block deal', 'bulk deal', 'insider trading',
+                            'cyber attack', 'data breach', 'recall',
+                            'strike', 'lockout', 'plant shutdown'
                         ]
 
-                        # Medium risk keywords
-                        medium_risk_keywords = [
-                            'order', 'contract', 'deal', 'partnership',
-                            'launch', 'product', 'approval', 'fda',
-                            'upgrade', 'downgrade', 'target price',
-                            'stake', 'holding', 'promoter', 'fii', 'dii'
+                        # ===== POSITIVE NEWS (ALLOW - Momentum) =====
+                        positive_keywords = [
+                            'order win', 'wins order', 'bags order', 'secures order',
+                            'contract', 'deal signed', 'partnership',
+                            'product launch', 'new launch', 'unveils',
+                            'fda approval', 'regulatory approval', 'gets approval',
+                            'patent', 'breakthrough',
+                            'upgrade', 'buy rating', 'add rating', 'overweight',
+                            'target price raise', 'price target hike',
+                            'expansion', 'new facility', 'capacity addition',
+                            'acquisition', 'merger', 'stake buy'
                         ]
 
-                        risk_level = "LOW"
-                        matched_keyword = ""
+                        # ===== NEUTRAL / CHECK NEWS (WARNING) =====
+                        neutral_keywords = [
+                            'dividend', 'bonus', 'split', 'buyback',
+                            'board meeting', 'agm', 'egm',
+                            'stake sale', 'promoter selling', 'fii selling',
+                            'holding change', 'shareholding pattern'
+                        ]
 
-                        for kw in high_risk_keywords:
+                        # Check negative first
+                        for kw in negative_keywords:
                             if kw in title:
-                                risk_level = "HIGH"
-                                matched_keyword = kw
-                                break
+                                return True, f"{kw.upper()} ({hours_ago:.0f}h)", "HIGH", "NEGATIVE"
 
-                        if risk_level == "LOW":
-                            for kw in medium_risk_keywords:
-                                if kw in title:
-                                    risk_level = "MEDIUM"
-                                    matched_keyword = kw
-                                    break
+                        # Check positive
+                        for kw in positive_keywords:
+                            if kw in title:
+                                return True, f"{kw.upper()} ({hours_ago:.0f}h)", "MEDIUM", "POSITIVE"
 
-                        if risk_level in ["HIGH", "MEDIUM"]:
-                            return True, f"{matched_keyword.upper()} ({hours_ago:.0f}h ago)", risk_level
+                        # Check neutral
+                        for kw in neutral_keywords:
+                            if kw in title:
+                                return True, f"{kw.upper()} ({hours_ago:.0f}h)", "MEDIUM", "NEUTRAL"
+
+                        # Generic news found but no keyword match
+                        return True, f"NEWS ({hours_ago:.0f}h)", "LOW", "NEUTRAL"
+
                 except:
                     continue
 
-        # Method 2: Check NSE corporate announcements (simple check)
-        # This is a basic check - for production, use proper API
-
-        return False, "No recent news", "LOW"
+        return False, "No recent news", "LOW", "NONE"
 
     except Exception as e:
-        return False, f"Error checking news: {str(e)}", "LOW"
+        return False, f"Error: {str(e)}", "LOW", "NONE"
 
 # ============================================================
 # NSE API FUNCTIONS
@@ -416,11 +423,10 @@ def analyze_orb_clean(symbol, orb_mins=15):
             qty_pct = 50
 
         # ===== NEWS CHECK =====
-        has_news, news_reason, news_risk = check_stock_news(symbol.replace('.NS', ''))
+        has_news, news_reason, news_risk, news_type = check_stock_news(symbol.replace('.NS', ''))
 
-        # If HIGH risk news, skip the stock
-        if news_risk == "HIGH":
-            return None  # Skip - news driven move = fake breakout risk
+        # NOTE: Intraday traders use ALL news as opportunity
+        # News info shown in table, trade decision is yours
 
         return {
             'orb_high': round(orb_high, 2),
@@ -441,6 +447,7 @@ def analyze_orb_clean(symbol, orb_mins=15):
             'has_news': has_news,
             'news_reason': news_reason,
             'news_risk': news_risk,
+            'news_type': news_type,
         }
     except Exception as e:
         return None
@@ -570,7 +577,7 @@ def get_merged_signal(ticker, oi_info, orb_data):
             "ATR%": f"{orb_atr_pct}%",
             "QTY": f"{orb_qty_pct}%",
             "SCORE": f"{score}%",
-            "NEWS": f"{orb_data.get('news_risk', 'LOW')}" if orb_data and orb_data.get('has_news') else "—",
+            "NEWS": f"{orb_data.get('news_type', '')}: {orb_data.get('news_reason', '')}" if orb_data and orb_data.get('has_news') else "—",
             "SL": sl,
             "TARGET": tgt,
             "ORB_DATA": orb_data,
@@ -682,9 +689,10 @@ def color_pnl(val):
 
 def color_news(val):
     v = str(val)
-    if 'HIGH' in v: return 'background:#ff000030;color:#ff2020;font-weight:700;'
-    if 'MEDIUM' in v: return 'background:#ffc70030;color:#ffc700;font-weight:700;'
-    return 'color:#00ff88;'
+    if 'NEGATIVE' in v: return 'background:#ff000030;color:#ff2020;font-weight:700;'
+    if 'POSITIVE' in v: return 'background:#00ff0030;color:#00ff00;font-weight:700;'
+    if 'NEUTRAL' in v: return 'background:#ffc70030;color:#ffc700;font-weight:700;'
+    return 'color:#6a8aaa;'
 
 def color_status(val):
     if val == "HIT TARGET": return 'color:#00ff88;font-weight:700'
@@ -934,7 +942,7 @@ with tab1:
         st.markdown("""
         <div style="color:#6a8aaa;font-size:11px;padding:10px 0;">
         📊 <b>STRATEGY:</b> ORB Breakout + OI Spurt Confirmation | Volume + VWAP + EMA Filters<br>
-        <span style="color:#ffc700;">⚡ 1% SL | 2% Target | News Filter ON | Fake Breakout Protected | Best Time: 9:30-10:30 AM</span>
+        <span style="color:#ffc700;">⚡ 1% SL | 2% Target | News Alert ON | All Signals Shown | Best Time: 9:30-10:30 AM</span>
         </div>
         """, unsafe_allow_html=True)
 
