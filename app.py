@@ -142,61 +142,53 @@ def get_dhan_security_id(symbol_ns):
     return DHAN_SECURITY_IDS.get(symbol, None)
 
 # ============================================================
-# NSEPY LIBRARY SETUP
+# NSEPYTHON LIBRARY SETUP
 # ============================================================
-# NSEpy fetches data directly from NSE India (free)
-# Better than Yahoo Finance for Indian stocks
+# NSEPython is actively maintained and uses NSE's new APIs
+# Install: pip install nsepythonserver (for cloud/server)
 
-def fetch_nsepy_data(symbol, period="5d", interval="5m"):
-    """Fetch data using NSEpy library"""
+def fetch_nsepython_data(symbol, period="5d", interval="5m"):
+    """Fetch data using NSEPython library"""
     try:
-        from nsepy import get_history
-        from datetime import date, timedelta
+        from nsepythonserver import equity_history
+        from datetime import datetime, timedelta
 
         symbol_clean = symbol.replace('.NS', '')
 
         # Calculate date range
-        end_date = date.today()
+        end_date = get_ist_now().strftime('%d-%m-%Y')
         days_map = {"1d": 1, "5d": 5, "10d": 10, "30d": 30, "90d": 90}
         days = days_map.get(period, 5)
-        start_date = end_date - timedelta(days=days)
+        start_date = (get_ist_now() - timedelta(days=days)).strftime('%d-%m-%Y')
 
-        # Fetch data
-        df = get_history(
-            symbol=symbol_clean,
-            start=start_date,
-            end=end_date,
-            index=False
-        )
+        # Fetch data using NSEPython
+        df = equity_history(symbol_clean, "EQ", start_date, end_date)
 
         if df is None or df.empty:
             return None
 
-        # Reset index carefully - nsepy returns index as Date
-        df = df.reset_index()
+        # NSEPython returns columns: CH_SYMBOL, CH_SERIES, CH_MARKET_TYPE, CH_TIMESTAMP, 
+        # CH_OPENING_PRICE, CH_TRADE_HIGH_PRICE, CH_TRADE_LOW_PRICE, CH_CLOSING_PRICE, 
+        # CH_LAST_TRADED_PRICE, CH_PREVIOUS_CLS_PRICE, CH_TOT_TRADED_QTY, etc.
 
-        # NSEpy column names are usually: Date, Symbol, Series, Prev Close, Open, High, Low, Last, Close, VWAP, Volume, Turnover, Trades, Deliverable Volume, %Deliverble
-        # We need: Date, Open, High, Low, Close, Volume
-
-        # Create a clean dataframe with required columns
+        # Create clean dataframe
         clean_df = pd.DataFrame()
 
         # Handle Date column
-        if 'Date' in df.columns:
-            clean_df['Date'] = pd.to_datetime(df['Date'])
-        elif 'date' in df.columns:
-            clean_df['Date'] = pd.to_datetime(df['date'])
-        else:
-            # Use index as date
-            clean_df['Date'] = pd.to_datetime(df.index)
+        if 'CH_TIMESTAMP' in df.columns:
+            clean_df['Date'] = pd.to_datetime(df['CH_TIMESTAMP'])
+        elif 'TIMESTAMP' in df.columns:
+            clean_df['Date'] = pd.to_datetime(df['TIMESTAMP'])
+        elif 'DATE' in df.columns:
+            clean_df['Date'] = pd.to_datetime(df['DATE'])
 
-        # Map columns
+        # Map NSEPython columns to standard format
         col_map = {
-            'Open': ['Open', 'open', 'OPEN'],
-            'High': ['High', 'high', 'HIGH'],
-            'Low': ['Low', 'low', 'LOW'],
-            'Close': ['Close', 'close', 'CLOSE', 'Last', 'last'],
-            'Volume': ['Volume', 'volume', 'VOLUME', 'Shares Traded', 'No. of Shares']
+            'Open': ['CH_OPENING_PRICE', 'OPEN', 'open', 'Open'],
+            'High': ['CH_TRADE_HIGH_PRICE', 'HIGH', 'high', 'High'],
+            'Low': ['CH_TRADE_LOW_PRICE', 'LOW', 'low', 'Low'],
+            'Close': ['CH_CLOSING_PRICE', 'CLOSE', 'close', 'Close'],
+            'Volume': ['CH_TOT_TRADED_QTY', 'VOLUME', 'volume', 'Volume', 'TOTTRDQTY']
         }
 
         for target_col, possible_names in col_map.items():
@@ -207,15 +199,15 @@ def fetch_nsepy_data(symbol, period="5d", interval="5m"):
                     found = True
                     break
             if not found:
-                st.warning(f"Column {target_col} not found in NSEpy data for {symbol}")
+                st.warning(f"Column {target_col} not found in NSEPython data for {symbol}")
                 clean_df[target_col] = 0
 
         return clean_df
     except ImportError:
-        st.warning("NSEpy library not installed. Install with: pip install nsepy")
+        st.warning("NSEPython not installed. Install with: pip install nsepythonserver")
         return None
     except Exception as e:
-        st.error(f"NSEpy Error for {symbol}: {e}")
+        st.error(f"NSEPython Error for {symbol}: {e}")
         return None
 
 # ============================================================
@@ -579,17 +571,17 @@ data_source = st.sidebar.radio(
     "Select Data Provider",
     [
         "Yahoo Finance (Free, 15min delay)",
-        "NSEpy (Free, NSE Direct)",
+        "NSEPython (Free, NSE Direct)",
         "Dhan API (Real-time, requires API key)"
     ]
 )
 
 dhan_access_token = ""
-if "NSEpy" in data_source:
+if "NSEPython" in data_source:
     st.sidebar.markdown("---")
-    st.sidebar.markdown("### NSEpy Setup")
-    st.sidebar.info("NSEpy fetches data directly from NSE India. No API key needed!")
-    st.sidebar.caption("Install: pip install nsepy")
+    st.sidebar.markdown("### NSEPython Setup")
+    st.sidebar.info("NSEPython fetches data directly from NSE India. No API key needed!")
+    st.sidebar.caption("Install: pip install nsepythonserver")
     dhan_access_token = ""
 
 elif "Dhan" in data_source:
@@ -676,13 +668,13 @@ st.sidebar.info(f"""**{accuracy_mode}**
 @st.cache_data(ttl=300)
 def fetch_data(symbol, period="5d", interval="5m", data_source="Yahoo Finance", access_token=""):
     try:
-        # Use NSEpy if selected
-        if "NSEpy" in data_source:
-            df = fetch_nsepy_data(symbol, period, interval)
+        # Use NSEPython if selected
+        if "NSEPython" in data_source:
+            df = fetch_nsepython_data(symbol, period, interval)
             if df is not None and not df.empty:
                 return df
             else:
-                st.warning(f"NSEpy failed for {symbol}, falling back to Yahoo Finance")
+                st.warning(f"NSEPython failed for {symbol}, falling back to Yahoo Finance")
 
         # Use Dhan API if selected and token is provided
         if "Dhan" in data_source and access_token:
