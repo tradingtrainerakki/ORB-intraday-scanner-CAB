@@ -601,7 +601,7 @@ def color_status(val):
 # PAGE CONFIG & LOGIN
 # ============================================================
 st.set_page_config(
-    page_title="F&O Pro Scanner",
+    page_title="ORB+Tech",
     page_icon="📈",
     layout="wide",
     initial_sidebar_state="collapsed"
@@ -749,7 +749,7 @@ if not st.session_state.authenticated:
         <div style="font-family:'Syne',sans-serif;font-size:1.5rem;font-weight:800;
                     background:linear-gradient(90deg,#00d4ff,#00ff88);
                     -webkit-background-clip:text;-webkit-text-fill-color:transparent;">
-            📈 F&O PRO SCANNER
+            📈 ORB+TECH
         </div>
         <div style="color:#3a5a7a;font-size:10px;letter-spacing:3px;margin-bottom:24px;">NSE · INTRADAY · PROFIT FOCUSED</div>
     </div>
@@ -777,7 +777,7 @@ st.markdown(f"""
 <div class="top-header">
   <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;">
     <div>
-      <div class="logo-text">📈 F&O PRO SCANNER</div>
+      <div class="logo-text">📈 ORB+TECH</div>
       <div class="logo-sub">NSE · Intraday · ORB Strategy · Fake Breakout Protected</div>
     </div>
     <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap;">
@@ -1068,7 +1068,7 @@ with tab3:
 st.markdown("---")
 st.markdown("""
 <div style="text-align:center;color:#3a5a7a;font-size:11px;">
-<b>F&O Pro Scanner — Profit Focused Edition</b> | ORB Strategy | 1% SL | 2% Target<br>
+<b>ORB+Tech — Profit Focused Edition</b> | ORB Strategy | 1% SL | 2% Target<br>
 Fake Breakout Protected | Educational purposes only. Not financial advice.<br>
 Best Time: 9:30-10:30 AM IST
 </div>
