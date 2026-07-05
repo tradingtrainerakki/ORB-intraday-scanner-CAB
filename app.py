@@ -169,40 +169,48 @@ def fetch_nsepy_data(symbol, period="5d", interval="5m"):
             index=False
         )
 
-        if df.empty:
+        if df is None or df.empty:
             return None
 
-        # Rename columns to match our format
+        # Reset index carefully - nsepy returns index as Date
         df = df.reset_index()
-        df.columns = [c[0] if isinstance(c, tuple) else c for c in df.columns]
 
-        # Ensure required columns exist
-        required_cols = ['Open', 'High', 'Low', 'Close', 'Volume']
-        for col in required_cols:
-            if col not in df.columns:
-                # Try lowercase
-                if col.lower() in df.columns:
-                    df[col] = df[col.lower()]
+        # NSEpy column names are usually: Date, Symbol, Series, Prev Close, Open, High, Low, Last, Close, VWAP, Volume, Turnover, Trades, Deliverable Volume, %Deliverble
+        # We need: Date, Open, High, Low, Close, Volume
 
-        # Add Date column if not present
-        if 'Date' not in df.columns:
-            if 'date' in df.columns:
-                df.rename(columns={'date': 'Date'}, inplace=True)
-            elif 'timestamp' in df.columns:
-                df.rename(columns={'timestamp': 'Date'}, inplace=True)
-            elif 'index' in df.columns:
-                df.rename(columns={'index': 'Date'}, inplace=True)
+        # Create a clean dataframe with required columns
+        clean_df = pd.DataFrame()
 
-        # Convert Date to datetime
+        # Handle Date column
         if 'Date' in df.columns:
-            df['Date'] = pd.to_datetime(df['Date'])
+            clean_df['Date'] = pd.to_datetime(df['Date'])
+        elif 'date' in df.columns:
+            clean_df['Date'] = pd.to_datetime(df['date'])
+        else:
+            # Use index as date
+            clean_df['Date'] = pd.to_datetime(df.index)
 
-        # Ensure numeric columns
-        for col in ['Open', 'High', 'Low', 'Close', 'Volume']:
-            if col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors='coerce')
+        # Map columns
+        col_map = {
+            'Open': ['Open', 'open', 'OPEN'],
+            'High': ['High', 'high', 'HIGH'],
+            'Low': ['Low', 'low', 'LOW'],
+            'Close': ['Close', 'close', 'CLOSE', 'Last', 'last'],
+            'Volume': ['Volume', 'volume', 'VOLUME', 'Shares Traded', 'No. of Shares']
+        }
 
-        return df
+        for target_col, possible_names in col_map.items():
+            found = False
+            for name in possible_names:
+                if name in df.columns:
+                    clean_df[target_col] = pd.to_numeric(df[name], errors='coerce')
+                    found = True
+                    break
+            if not found:
+                st.warning(f"Column {target_col} not found in NSEpy data for {symbol}")
+                clean_df[target_col] = 0
+
+        return clean_df
     except ImportError:
         st.warning("NSEpy library not installed. Install with: pip install nsepy")
         return None
@@ -219,8 +227,8 @@ DATA_FILE = os.path.join(TEMP_DIR, "scanner_data.json")
 # ============================================================
 # PASSWORD PROTECTION
 # ============================================================
-DEFAULT_USERNAME = "Akki"
-DEFAULT_PASSWORD = "Ca@1809"
+DEFAULT_USERNAME = "admin"
+DEFAULT_PASSWORD = "scanner123"
 
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
