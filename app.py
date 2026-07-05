@@ -142,6 +142,75 @@ def get_dhan_security_id(symbol_ns):
     return DHAN_SECURITY_IDS.get(symbol, None)
 
 # ============================================================
+# NSEPY LIBRARY SETUP
+# ============================================================
+# NSEpy fetches data directly from NSE India (free)
+# Better than Yahoo Finance for Indian stocks
+
+def fetch_nsepy_data(symbol, period="5d", interval="5m"):
+    """Fetch data using NSEpy library"""
+    try:
+        from nsepy import get_history
+        from datetime import date, timedelta
+
+        symbol_clean = symbol.replace('.NS', '')
+
+        # Calculate date range
+        end_date = date.today()
+        days_map = {"1d": 1, "5d": 5, "10d": 10, "30d": 30, "90d": 90}
+        days = days_map.get(period, 5)
+        start_date = end_date - timedelta(days=days)
+
+        # Fetch data
+        df = get_history(
+            symbol=symbol_clean,
+            start=start_date,
+            end=end_date,
+            index=False
+        )
+
+        if df.empty:
+            return None
+
+        # Rename columns to match our format
+        df = df.reset_index()
+        df.columns = [c[0] if isinstance(c, tuple) else c for c in df.columns]
+
+        # Ensure required columns exist
+        required_cols = ['Open', 'High', 'Low', 'Close', 'Volume']
+        for col in required_cols:
+            if col not in df.columns:
+                # Try lowercase
+                if col.lower() in df.columns:
+                    df[col] = df[col.lower()]
+
+        # Add Date column if not present
+        if 'Date' not in df.columns:
+            if 'date' in df.columns:
+                df.rename(columns={'date': 'Date'}, inplace=True)
+            elif 'timestamp' in df.columns:
+                df.rename(columns={'timestamp': 'Date'}, inplace=True)
+            elif 'index' in df.columns:
+                df.rename(columns={'index': 'Date'}, inplace=True)
+
+        # Convert Date to datetime
+        if 'Date' in df.columns:
+            df['Date'] = pd.to_datetime(df['Date'])
+
+        # Ensure numeric columns
+        for col in ['Open', 'High', 'Low', 'Close', 'Volume']:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+
+        return df
+    except ImportError:
+        st.warning("NSEpy library not installed. Install with: pip install nsepy")
+        return None
+    except Exception as e:
+        st.error(f"NSEpy Error for {symbol}: {e}")
+        return None
+
+# ============================================================
 # STREAMLIT CLOUD COMPATIBLE PATHS
 # ============================================================
 TEMP_DIR = tempfile.gettempdir()
@@ -150,8 +219,8 @@ DATA_FILE = os.path.join(TEMP_DIR, "scanner_data.json")
 # ============================================================
 # PASSWORD PROTECTION
 # ============================================================
-DEFAULT_USERNAME = "Akki"
-DEFAULT_PASSWORD = "Ca@1809"
+DEFAULT_USERNAME = "admin"
+DEFAULT_PASSWORD = "scanner123"
 
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
@@ -500,11 +569,22 @@ st.sidebar.header("Scanner Settings")
 st.sidebar.subheader("Data Source")
 data_source = st.sidebar.radio(
     "Select Data Provider",
-    ["Yahoo Finance (Free, 15min delay)", "Dhan API (Real-time, requires API key)"]
+    [
+        "Yahoo Finance (Free, 15min delay)",
+        "NSEpy (Free, NSE Direct)",
+        "Dhan API (Real-time, requires API key)"
+    ]
 )
 
 dhan_access_token = ""
-if "Dhan" in data_source:
+if "NSEpy" in data_source:
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("### NSEpy Setup")
+    st.sidebar.info("NSEpy fetches data directly from NSE India. No API key needed!")
+    st.sidebar.caption("Install: pip install nsepy")
+    dhan_access_token = ""
+
+elif "Dhan" in data_source:
     st.sidebar.markdown("---")
     st.sidebar.markdown("### Dhan API Setup")
 
@@ -588,6 +668,14 @@ st.sidebar.info(f"""**{accuracy_mode}**
 @st.cache_data(ttl=300)
 def fetch_data(symbol, period="5d", interval="5m", data_source="Yahoo Finance", access_token=""):
     try:
+        # Use NSEpy if selected
+        if "NSEpy" in data_source:
+            df = fetch_nsepy_data(symbol, period, interval)
+            if df is not None and not df.empty:
+                return df
+            else:
+                st.warning(f"NSEpy failed for {symbol}, falling back to Yahoo Finance")
+
         # Use Dhan API if selected and token is provided
         if "Dhan" in data_source and access_token:
             security_id = get_dhan_security_id(symbol)
