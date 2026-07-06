@@ -10,6 +10,7 @@ import os
 import hashlib
 import tempfile
 import pytz
+import time
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -150,8 +151,8 @@ DATA_FILE = os.path.join(TEMP_DIR, "scanner_data.json")
 # ============================================================
 # PASSWORD PROTECTION
 # ============================================================
-DEFAULT_USERNAME = "Akki"
-DEFAULT_PASSWORD = "Ca@1809"
+DEFAULT_USERNAME = "admin"
+DEFAULT_PASSWORD = "scanner123"
 
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
@@ -695,8 +696,17 @@ def fetch_data(symbol, period="5d", interval="5m", data_source="Yahoo Finance", 
                 st.warning(f"Dhan Security ID not found for {symbol}, using Yahoo Finance")
 
         # Fallback to Yahoo Finance
-        ticker = yf.Ticker(symbol)
-        df = ticker.history(period=period, interval=interval)
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                ticker = yf.Ticker(symbol)
+                df = ticker.history(period=period, interval=interval)
+                break
+            except Exception as e:
+                if "Too Many Requests" in str(e) and attempt < max_retries - 1:
+                    time.sleep(2)  # Wait longer on rate limit
+                    continue
+                raise
         if df.empty:
             return None
         df.reset_index(inplace=True)
@@ -1170,6 +1180,8 @@ elif refresh:
     results = []
     total_stocks = len(stock_list)
     for i, symbol in enumerate(stock_list):
+        # Small delay to avoid rate limiting
+        time.sleep(0.3)
         progress = (i + 1) / total_stocks
         progress_bar.progress(min(progress, 0.99))
         status_text.text(f"Analyzing {symbol}... ({i+1}/{total_stocks})")
