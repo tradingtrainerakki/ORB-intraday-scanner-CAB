@@ -150,8 +150,8 @@ DATA_FILE = os.path.join(TEMP_DIR, "scanner_data.json")
 # ============================================================
 # PASSWORD PROTECTION
 # ============================================================
-DEFAULT_USERNAME = "Akki"
-DEFAULT_PASSWORD = "Ca@1809"
+DEFAULT_USERNAME = "admin"
+DEFAULT_PASSWORD = "scanner123"
 
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
@@ -1027,10 +1027,10 @@ def display_results(results, sector_perf):
         st.warning("No signals found.")
         st.info("Market hours: 9:15 AM - 3:30 PM IST")
         return
-    strong_buy = len([r for r in results if "STRONG BUY" in r['final_signal']])
-    buy = len([r for r in results if r['final_signal'] == "BUY"])
-    strong_sell = len([r for r in results if "STRONG SELL" in r['final_signal']])
-    sell = len([r for r in results if r['final_signal'] == "SELL"])
+    strong_buy = len([r for r in results if r.get('final_signal') and "STRONG BUY" in r.get('final_signal', '')])
+    buy = len([r for r in results if r.get('final_signal') == "BUY"])
+    strong_sell = len([r for r in results if r.get('final_signal') and "STRONG SELL" in r.get('final_signal', '')])
+    sell = len([r for r in results if r.get('final_signal') == "SELL"])
     col1, col2, col3, col4 = st.columns(4)
     with col1:
         st.markdown(f'<div class="metric-card"><h3>STRONG BUY</h3><h1>{strong_buy}</h1></div>', unsafe_allow_html=True)
@@ -1043,8 +1043,8 @@ def display_results(results, sector_perf):
     st.markdown("---")
     results = sorted(results, key=lambda x: x['accuracy'], reverse=True)
     for row in results:
-        sig = row['final_signal']
-        acc = row['accuracy']
+        sig = row.get('final_signal', 'NEUTRAL')
+        acc = row.get('accuracy', 0)
         if "STRONG BUY" in sig:
             card_class = "strong-buy"
         elif sig == "BUY":
@@ -1061,7 +1061,7 @@ def display_results(results, sector_perf):
             acc_class = "acc-80"
         else:
             acc_class = "acc-70"
-        with st.expander(f"{sig} **{row['symbol']}** | Rs{row['current_price']} | {acc}%"):
+        with st.expander(f"{sig} **{row['symbol']}** | Rs{row.get('current_price', 0)} | {acc}%"):
             st.markdown(f'<div class="signal-card {card_class}"><h2>{sig}</h2></div>', unsafe_allow_html=True)
             st.markdown(f'<div class="accuracy-badge {acc_class}">{acc}% ({row["filters_passed"]}/{row["total_filters"]})</div>', unsafe_allow_html=True)
             if row.get('sector'):
