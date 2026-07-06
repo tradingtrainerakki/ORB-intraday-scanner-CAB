@@ -142,81 +142,6 @@ def get_dhan_security_id(symbol_ns):
     return DHAN_SECURITY_IDS.get(symbol, None)
 
 # ============================================================
-# NSEPYTHON LIBRARY SETUP
-# ============================================================
-# NSEPython is actively maintained and uses NSE's new APIs
-# Install: pip install nsepythonserver (for cloud/server)
-
-def fetch_nsepython_data(symbol, period="5d", interval="5m"):
-    """Fetch data using NSEPython library"""
-    try:
-        from nsepythonserver import equity_intraday, equity_history
-        from datetime import datetime, timedelta
-
-        symbol_clean = symbol.replace('.NS', '')
-
-        # For intraday data, use equity_intraday
-        # For daily data, use equity_history
-        if interval in ["1m", "5m", "15m", "30m", "60m"]:
-            # Intraday data
-            df = equity_intraday(symbol_clean, "EQ")
-
-            if df is None or df.empty:
-                return None
-
-            # equity_intraday returns: timestamp, open, high, low, close, volume
-            clean_df = pd.DataFrame()
-
-            if 'timestamp' in df.columns:
-                clean_df['Date'] = pd.to_datetime(df['timestamp'], unit='s')
-            elif 'Timestamp' in df.columns:
-                clean_df['Date'] = pd.to_datetime(df['Timestamp'], unit='s')
-
-            for col in ['open', 'high', 'low', 'close', 'volume']:
-                if col in df.columns:
-                    clean_df[col.capitalize()] = pd.to_numeric(df[col], errors='coerce')
-
-            return clean_df
-        else:
-            # Daily data
-            end_date = get_ist_now().strftime('%d-%m-%Y')
-            days_map = {"1d": 1, "5d": 5, "10d": 10, "30d": 30, "90d": 90}
-            days = days_map.get(period, 5)
-            start_date = (get_ist_now() - timedelta(days=days)).strftime('%d-%m-%Y')
-
-            df = equity_history(symbol_clean, "EQ", start_date, end_date)
-
-            if df is None or df.empty:
-                return None
-
-            clean_df = pd.DataFrame()
-
-            if 'CH_TIMESTAMP' in df.columns:
-                clean_df['Date'] = pd.to_datetime(df['CH_TIMESTAMP'])
-
-            col_map = {
-                'Open': ['CH_OPENING_PRICE', 'OPEN', 'open'],
-                'High': ['CH_TRADE_HIGH_PRICE', 'HIGH', 'high'],
-                'Low': ['CH_TRADE_LOW_PRICE', 'LOW', 'low'],
-                'Close': ['CH_CLOSING_PRICE', 'CLOSE', 'close'],
-                'Volume': ['CH_TOT_TRADED_QTY', 'VOLUME', 'volume']
-            }
-
-            for target_col, possible_names in col_map.items():
-                for name in possible_names:
-                    if name in df.columns:
-                        clean_df[target_col] = pd.to_numeric(df[name], errors='coerce')
-                        break
-
-            return clean_df
-    except ImportError:
-        st.warning("NSEPython not installed. Install with: pip install nsepythonserver")
-        return None
-    except Exception as e:
-        st.error(f"NSEPython Error for {symbol}: {e}")
-        return None
-
-# ============================================================
 # STREAMLIT CLOUD COMPATIBLE PATHS
 # ============================================================
 TEMP_DIR = tempfile.gettempdir()
@@ -225,8 +150,8 @@ DATA_FILE = os.path.join(TEMP_DIR, "scanner_data.json")
 # ============================================================
 # PASSWORD PROTECTION
 # ============================================================
-DEFAULT_USERNAME = "Akki"
-DEFAULT_PASSWORD = "Ca@1809"
+DEFAULT_USERNAME = "admin"
+DEFAULT_PASSWORD = "scanner123"
 
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
@@ -575,22 +500,11 @@ st.sidebar.header("Scanner Settings")
 st.sidebar.subheader("Data Source")
 data_source = st.sidebar.radio(
     "Select Data Provider",
-    [
-        "Yahoo Finance (Free, 15min delay)",
-        "NSEPython (Free, NSE Direct)",
-        "Dhan API (Real-time, requires API key)"
-    ]
+    ["Yahoo Finance (Free, 15min delay)", "Dhan API (Real-time, requires API key)"]
 )
 
 dhan_access_token = ""
-if "NSEPython" in data_source:
-    st.sidebar.markdown("---")
-    st.sidebar.markdown("### NSEPython Setup")
-    st.sidebar.info("NSEPython fetches data directly from NSE India. No API key needed!")
-    st.sidebar.caption("Install: pip install nsepythonserver")
-    dhan_access_token = ""
-
-elif "Dhan" in data_source:
+if "Dhan" in data_source:
     st.sidebar.markdown("---")
     st.sidebar.markdown("### Dhan API Setup")
 
@@ -674,14 +588,6 @@ st.sidebar.info(f"""**{accuracy_mode}**
 @st.cache_data(ttl=300)
 def fetch_data(symbol, period="5d", interval="5m", data_source="Yahoo Finance", access_token=""):
     try:
-        # Use NSEPython if selected
-        if "NSEPython" in data_source:
-            df = fetch_nsepython_data(symbol, period, interval)
-            if df is not None and not df.empty:
-                return df
-            else:
-                st.warning(f"NSEPython failed for {symbol}, falling back to Yahoo Finance")
-
         # Use Dhan API if selected and token is provided
         if "Dhan" in data_source and access_token:
             security_id = get_dhan_security_id(symbol)
