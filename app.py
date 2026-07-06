@@ -1061,7 +1061,16 @@ def display_results(results, sector_perf):
             acc_class = "acc-80"
         else:
             acc_class = "acc-70"
-        with st.expander(f"{sig} **{row['symbol']}** | Rs{row.get('current_price', 0)} | {acc}%"):
+        news_badge = ""
+        if row.get('news_impact') and row['news_impact'] != "NO DATA":
+            if row['news_impact'] == "SUPPORTS":
+                news_badge = " 🟢"
+            elif row['news_impact'] == "CONTRADICTS":
+                news_badge = " 🔴"
+            else:
+                news_badge = " 🟡"
+
+        with st.expander(f"{sig} **{row.get('symbol', 'N/A')}** | Rs{row.get('current_price', 0)} | {acc}%{news_badge}"):
             st.markdown(f'<div class="signal-card {card_class}"><h2>{sig}</h2></div>', unsafe_allow_html=True)
             st.markdown(f'<div class="accuracy-badge {acc_class}">{acc}% ({row["filters_passed"]}/{row["total_filters"]})</div>', unsafe_allow_html=True)
             if row.get('sector'):
@@ -1070,6 +1079,15 @@ def display_results(results, sector_perf):
                 news_sentiment = "POSITIVE" if row['news_impact'] == "SUPPORTS" else ("NEGATIVE" if row['news_impact'] == "CONTRADICTS" else "NEUTRAL")
                 news_class = "news-positive" if news_sentiment == "POSITIVE" else ("news-negative" if news_sentiment == "NEGATIVE" else "news-neutral")
                 st.markdown(f'<div class="{news_class}"><b>News Impact: {row["news_impact"]}</b></div>', unsafe_allow_html=True)
+
+                # Show actual news articles if available
+                if row.get('news_data') and row['news_data'].get('articles'):
+                    with st.expander("📰 View News Details"):
+                        for article in row['news_data']['articles'][:3]:
+                            sentiment_emoji = "🟢" if article.get('sentiment') == "POSITIVE" else ("🔴" if article.get('sentiment') == "NEGATIVE" else "⚪")
+                            st.markdown(f"{sentiment_emoji} **{article.get('title', 'No title')}**")
+                            st.caption(f"Source: {article.get('publisher', 'Unknown')} | Score: {article.get('score', 0)}")
+                            st.markdown("---")
             col1, col2, col3 = st.columns(3)
             with col1:
                 st.markdown(f'<div class="filter-box"><b>Trade</b><br>Entry: <b>Rs{row["entry_price"]}</b><br>SL: <span style="color:red">Rs{row["stop_loss"]}</span><br>Target: <span style="color:green">Rs{row["target"]}</span><br>Risk: Rs{row["risk"]} ({row["risk_percent"]}%)<br>R:R = 1:{risk_reward}</div>', unsafe_allow_html=True)
@@ -1093,7 +1111,14 @@ def display_results(results, sector_perf):
                     color = "green" if passed else "red"
                     st.markdown(f'<p style="color:{color}; font-weight:bold;">{filter_name}</p><small>{detail}</small>', unsafe_allow_html=True)
     st.markdown("---")
-    df_export = pd.DataFrame([{k: v for k, v in r.items() if k not in ['oi_data', 'news_data', 'filter_details']} for r in results])
+    # Add news summary for export
+    export_results = []
+    for r in results:
+        er = {k: v for k, v in r.items() if k not in ['oi_data', 'news_data', 'filter_details']}
+        er['NEWS_SENTIMENT'] = r.get('news_data', {}).get('overall_sentiment', 'NO DATA') if r.get('news_data') else 'NO DATA'
+        er['NEWS_IMPACT'] = r.get('news_impact', 'NO DATA')
+        export_results.append(er)
+    df_export = pd.DataFrame(export_results)
     csv = df_export.to_csv(index=False)
     st.download_button(label="Download Signals", data=csv, file_name=f"sector_scanner_{get_ist_now().strftime('%Y%m%d_%H%M')}.csv", mime="text/csv")
 
