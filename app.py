@@ -709,31 +709,22 @@ if "Kotak" in data_source:
     st.sidebar.markdown("---")
     st.sidebar.markdown("### Kotak Neo API Setup")
 
-    # Step 1: Get Consumer Key
+    # Step 1: Get Consumer Key (same as Access Token in Kotak Neo)
     st.sidebar.markdown("**Step 1:** Copy Consumer Key from Neo Trade API page")
     kotak_consumer_key = st.sidebar.text_input(
-        "Consumer Key",
+        "Consumer Key / Access Token",
         type="password",
         placeholder="Paste Consumer Key",
-        help="Found in Neo Trade API → Default Application"
+        help="Found in Neo Trade API → Default Application. Same as Access Token."
     )
 
-    # Step 2: Get Access Token  
-    st.sidebar.markdown("**Step 2:** Copy Access Token")
-    kotak_access_token = st.sidebar.text_input(
-        "Access Token",
-        type="password", 
-        placeholder="Paste Access Token",
-        help="Found in Neo Trade API page, starts with numbers/letters"
-    )
-
-    if kotak_consumer_key and kotak_access_token:
-        st.sidebar.success("Kotak Neo credentials saved!")
+    if kotak_consumer_key:
+        st.sidebar.success("Kotak Neo API key saved!")
     else:
-        st.sidebar.warning("Please enter both Consumer Key and Access Token")
+        st.sidebar.warning("Please enter Consumer Key")
 
     st.sidebar.markdown("---")
-    st.sidebar.info("Token expires every 24 hours. Generate new token daily from Kotak Neo app.")
+    st.sidebar.info("Key expires every 24 hours. Generate new key daily from Kotak Neo app.")
 
 
 stock_options = {
