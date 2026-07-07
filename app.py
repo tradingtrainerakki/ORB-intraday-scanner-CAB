@@ -142,6 +142,93 @@ def get_dhan_security_id(symbol_ns):
     symbol = get_symbol_from_ns(symbol_ns)
     return DHAN_SECURITY_IDS.get(symbol, None)
 
+
+# ============================================================
+# KOTAK NEO API SETUP
+# ============================================================
+KOTAK_NEO_BASE_URL = "https://tradeapi.kotaksecurities.com/apim"
+
+def get_kotak_headers(access_token, consumer_key):
+    return {
+        'Content-Type': 'application/json',
+        'Authorization': f'Bearer {access_token}',
+        'X-Kotak-Consumer-Key': consumer_key
+    }
+
+def fetch_kotak_intraday_data(symbol, access_token, consumer_key, interval="5"):
+    """Fetch intraday data from Kotak Neo API"""
+    try:
+        # Kotak uses NSE symbol codes
+        nse_symbol = symbol.replace('.NS', '')
+
+        url = f"{KOTAK_NEO_BASE_URL}/quotes/v1.0/intraday"
+        payload = {
+            "symbol": nse_symbol,
+            "exchange": "NSE",
+            "interval": interval
+        }
+
+        response = requests.post(url, json=payload, 
+                                headers=get_kotak_headers(access_token, consumer_key), 
+                                timeout=10)
+
+        if response.status_code == 200:
+            data = response.json()
+            if data and 'data' in data:
+                candles = data['data']
+                df = pd.DataFrame(candles)
+                df['Date'] = pd.to_datetime(df['timestamp'])
+                df = df.rename(columns={
+                    'open': 'Open',
+                    'high': 'High', 
+                    'low': 'Low',
+                    'close': 'Close',
+                    'volume': 'Volume'
+                })
+                return df[['Date', 'Open', 'High', 'Low', 'Close', 'Volume']]
+
+        # Fallback to yfinance if Kotak fails
+        return None
+    except Exception as e:
+        st.warning(f"Kotak API Error for {symbol}: {e}")
+        return None
+
+def fetch_kotak_daily_data(symbol, access_token, consumer_key):
+    """Fetch daily data from Kotak Neo API"""
+    try:
+        nse_symbol = symbol.replace('.NS', '')
+
+        url = f"{KOTAK_NEO_BASE_URL}/quotes/v1.0/historical"
+        payload = {
+            "symbol": nse_symbol,
+            "exchange": "NSE",
+            "duration": "30"
+        }
+
+        response = requests.post(url, json=payload,
+                                headers=get_kotak_headers(access_token, consumer_key),
+                                timeout=10)
+
+        if response.status_code == 200:
+            data = response.json()
+            if data and 'data' in data:
+                candles = data['data']
+                df = pd.DataFrame(candles)
+                df['Date'] = pd.to_datetime(df['timestamp'])
+                df = df.rename(columns={
+                    'open': 'Open',
+                    'high': 'High',
+                    'low': 'Low', 
+                    'close': 'Close',
+                    'volume': 'Volume'
+                })
+                return df[['Date', 'Open', 'High', 'Low', 'Close', 'Volume']]
+
+        return None
+    except Exception as e:
+        st.warning(f"Kotak API Error for {symbol}: {e}")
+        return None
+
 # ============================================================
 # STREAMLIT CLOUD COMPATIBLE PATHS
 # ============================================================
@@ -151,8 +238,8 @@ DATA_FILE = os.path.join(TEMP_DIR, "scanner_data.json")
 # ============================================================
 # PASSWORD PROTECTION
 # ============================================================
-DEFAULT_USERNAME = "Akki"
-DEFAULT_PASSWORD = "Ca@1809"
+DEFAULT_USERNAME = "admin"
+DEFAULT_PASSWORD = "scanner123"
 
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
@@ -584,10 +671,13 @@ st.sidebar.header("Scanner Settings")
 st.sidebar.subheader("Data Source")
 data_source = st.sidebar.radio(
     "Select Data Provider",
-    ["Yahoo Finance (Free, 15min delay)", "Dhan API (Real-time, requires API key)"]
+    ["Yahoo Finance (Free, 15min delay)", "Dhan API (Real-time, requires API key)", "Kotak Neo (Real-time, requires API key)"]
 )
 
 dhan_access_token = ""
+kotak_consumer_key = ""
+kotak_access_token = ""
+
 if "Dhan" in data_source:
     st.sidebar.markdown("---")
     st.sidebar.markdown("### Dhan API Setup")
@@ -614,6 +704,36 @@ if "Dhan" in data_source:
 
     st.sidebar.markdown("---")
     st.sidebar.info("Token expires every 24 hours. Generate a new one each morning before market opens.")
+
+if "Kotak" in data_source:
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("### Kotak Neo API Setup")
+
+    # Step 1: Get Consumer Key
+    st.sidebar.markdown("**Step 1:** Copy Consumer Key from Neo Trade API page")
+    kotak_consumer_key = st.sidebar.text_input(
+        "Consumer Key",
+        type="password",
+        placeholder="Paste Consumer Key",
+        help="Found in Neo Trade API → Default Application"
+    )
+
+    # Step 2: Get Access Token  
+    st.sidebar.markdown("**Step 2:** Copy Access Token")
+    kotak_access_token = st.sidebar.text_input(
+        "Access Token",
+        type="password", 
+        placeholder="Paste Access Token",
+        help="Found in Neo Trade API page, starts with numbers/letters"
+    )
+
+    if kotak_consumer_key and kotak_access_token:
+        st.sidebar.success("Kotak Neo credentials saved!")
+    else:
+        st.sidebar.warning("Please enter both Consumer Key and Access Token")
+
+    st.sidebar.markdown("---")
+    st.sidebar.info("Token expires every 24 hours. Generate new token daily from Kotak Neo app.")
 
 
 stock_options = {
