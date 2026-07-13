@@ -14,23 +14,14 @@ import time
 import warnings
 warnings.filterwarnings('ignore')
 
-# ============================================================
-# TIMEZONE SETUP - IST (Indian Standard Time)
-# ============================================================
 IST = pytz.timezone('Asia/Kolkata')
 
 def get_ist_now():
-    """Get current time in IST"""
     return datetime.now(IST)
 
 def get_ist_date():
-    """Get current date in IST"""
     return datetime.now(IST).date()
 
-# ============================================================
-# DHAN API SETUP
-# ============================================================
-# Dhan Security IDs for Nifty 50 stocks
 DHAN_SECURITY_IDS = {
     "RELIANCE": "2885", "TCS": "11536", "HDFCBANK": "1333", "ICICIBANK": "4963",
     "INFY": "1594", "HINDUNILVR": "1394", "ITC": "1660", "SBIN": "3045",
@@ -47,7 +38,6 @@ DHAN_SECURITY_IDS = {
     "BAJAJ-AUTO": "16669", "TATACONSUM": "3432",
 }
 
-# Dhan API endpoints
 DHAN_BASE_URL = "https://api.dhan.co/v2"
 
 def get_dhan_headers(access_token):
@@ -57,13 +47,11 @@ def get_dhan_headers(access_token):
     }
 
 def fetch_dhan_intraday_data(security_id, access_token, interval="5", from_date=None, to_date=None):
-    """Fetch intraday data from Dhan API"""
     try:
         if from_date is None:
             from_date = (get_ist_now() - timedelta(days=5)).strftime('%Y-%m-%d %H:%M:%S')
         if to_date is None:
             to_date = get_ist_now().strftime('%Y-%m-%d %H:%M:%S')
-
         url = f"{DHAN_BASE_URL}/charts/intraday"
         payload = {
             "securityId": security_id,
@@ -73,9 +61,7 @@ def fetch_dhan_intraday_data(security_id, access_token, interval="5", from_date=
             "fromDate": from_date,
             "toDate": to_date
         }
-
         response = requests.post(url, json=payload, headers=get_dhan_headers(access_token), timeout=10)
-
         if response.status_code == 200:
             data = response.json()
             if data and 'open' in data:
@@ -96,13 +82,11 @@ def fetch_dhan_intraday_data(security_id, access_token, interval="5", from_date=
         return None
 
 def fetch_dhan_daily_data(security_id, access_token, from_date=None, to_date=None):
-    """Fetch daily data from Dhan API"""
     try:
         if from_date is None:
             from_date = (get_ist_now() - timedelta(days=30)).strftime('%Y-%m-%d')
         if to_date is None:
             to_date = get_ist_now().strftime('%Y-%m-%d')
-
         url = f"{DHAN_BASE_URL}/charts/historical"
         payload = {
             "securityId": security_id,
@@ -111,9 +95,7 @@ def fetch_dhan_daily_data(security_id, access_token, from_date=None, to_date=Non
             "fromDate": from_date,
             "toDate": to_date
         }
-
         response = requests.post(url, json=payload, headers=get_dhan_headers(access_token), timeout=10)
-
         if response.status_code == 200:
             data = response.json()
             if data and 'open' in data:
@@ -134,24 +116,15 @@ def fetch_dhan_daily_data(security_id, access_token, from_date=None, to_date=Non
         return None
 
 def get_symbol_from_ns(symbol_ns):
-    """Extract symbol from .NS format"""
     return symbol_ns.replace('.NS', '')
 
 def get_dhan_security_id(symbol_ns):
-    """Get Dhan security ID for a symbol"""
     symbol = get_symbol_from_ns(symbol_ns)
     return DHAN_SECURITY_IDS.get(symbol, None)
 
-
-# ============================================================
-# STREAMLIT CLOUD COMPATIBLE PATHS
-# ============================================================
 TEMP_DIR = tempfile.gettempdir()
 DATA_FILE = os.path.join(TEMP_DIR, "scanner_data.json")
 
-# ============================================================
-# PASSWORD PROTECTION
-# ============================================================
 DEFAULT_USERNAME = "Akki"
 DEFAULT_PASSWORD = "Ca@1809"
 
@@ -176,9 +149,6 @@ def logout():
     st.session_state.authenticated = False
     st.session_state.username = ""
 
-# ============================================================
-# DATA PERSISTENCE
-# ============================================================
 if 'saved_results' not in st.session_state:
     st.session_state.saved_results = None
     st.session_state.saved_sector_perf = None
@@ -247,9 +217,6 @@ def clear_saved_data():
         except:
             pass
 
-# ============================================================
-# LOGIN PAGE
-# ============================================================
 if not st.session_state.authenticated:
     st.set_page_config(page_title="Scanner Login", page_icon="", layout="centered")
     col1, col2, col3 = st.columns([1, 2, 1])
@@ -278,9 +245,6 @@ if not st.session_state.authenticated:
         """, unsafe_allow_html=True)
     st.stop()
 
-# ============================================================
-# MAIN APP
-# ============================================================
 st.set_page_config(page_title="Independent Sector Scanner", page_icon="", layout="wide", initial_sidebar_state="expanded")
 
 with st.sidebar:
@@ -322,9 +286,6 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# ============================================================
-# COLOR FUNCTIONS FOR DATAFRAME STYLING
-# ============================================================
 def color_signal(val):
     v = str(val)
     if "STRONG BUY" in v: return "background:#00ff0030;color:#00ff00;font-weight:700;"
@@ -406,14 +367,14 @@ def color_news(val):
     return 'color:#6a8aaa;'
 
 st.markdown('<p class="main-header">Independent Sector Scanner</p>', unsafe_allow_html=True)
-st.markdown('<p class="sub-header">Nifty Independent | Sector-Based | Stock-Specific Strength</p>', unsafe_allow_html=True)
+st.markdown('<p class="sub-header">5-Filter ORB System | Gap+Spike Protection | Clean Setup</p>', unsafe_allow_html=True)
 
 saved_data = load_scan_data()
 if saved_data and saved_data['timestamp']:
     st.markdown(f"""
     <div class="persistence-info">
-        <b>Last Scan Saved:</b> {saved_data['timestamp']} | 
-        <b>Stocks:</b> {len(saved_data['stock_list']) if saved_data['stock_list'] else 0} | 
+        <b>Last Scan Saved:</b> {saved_data['timestamp']} |
+        <b>Stocks:</b> {len(saved_data['stock_list']) if saved_data['stock_list'] else 0} |
         <b>Signals:</b> {len(saved_data['results']) if saved_data['results'] else 0}
         <br><small>Data is saved automatically. Even if PC sleeps, your last scan will be here!</small>
     </div>
@@ -579,9 +540,6 @@ def parse_oi_data(data):
 
 st.sidebar.header("Scanner Settings")
 
-# ============================================================
-# DATA SOURCE SELECTION
-# ============================================================
 st.sidebar.subheader("Data Source")
 data_source = st.sidebar.radio(
     "Select Data Provider",
@@ -593,12 +551,8 @@ dhan_access_token = ""
 if "Dhan" in data_source:
     st.sidebar.markdown("---")
     st.sidebar.markdown("### Dhan API Setup")
-
-    # Step 1: Generate Token
     st.sidebar.markdown("**Step 1:** [Click here to generate token](https://web.dhan.co/dhanhq)")
     st.sidebar.caption("Login → DhanHQ Trading APIs → Generate Access Token → Copy")
-
-    # Step 2: Paste Token
     st.sidebar.markdown("**Step 2:** Paste your token below")
     dhan_access_token = st.sidebar.text_input(
         "Dhan Access Token",
@@ -606,25 +560,135 @@ if "Dhan" in data_source:
         placeholder="Paste token here and press Enter",
         help="Token expires in 24 hours. Generate a new one daily."
     )
-
-    # Show token status
     if dhan_access_token:
         st.sidebar.success("Token saved for this session!")
         st.sidebar.caption("Token will be lost if you refresh the page. That's normal.")
     else:
         st.sidebar.warning("Please paste your Dhan Access Token above")
-
     st.sidebar.markdown("---")
     st.sidebar.info("Token expires every 24 hours. Generate a new one each morning before market opens.")
 
-# Kotak Neo removed - API not suitable for this scanner
-
-
 stock_options = {
-    "Nifty 50": ["RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "ICICIBANK.NS", "INFY.NS", "HINDUNILVR.NS", "ITC.NS", "SBIN.NS", "BHARTIARTL.NS", "KOTAKBANK.NS", "LT.NS", "AXISBANK.NS", "ASIANPAINT.NS", "MARUTI.NS", "TITAN.NS", "SUNPHARMA.NS", "BAJFINANCE.NS", "WIPRO.NS", "ULTRACEMCO.NS", "NESTLEIND.NS", "POWERGRID.NS", "NTPC.NS", "TATASTEEL.NS", "M&M.NS", "HCLTECH.NS", "TECHM.NS", "INDUSINDBK.NS", "GRASIM.NS", "ADANIENT.NS", "CIPLA.NS", "SBILIFE.NS", "BAJAJFINSV.NS", "BRITANNIA.NS", "APOLLOHOSP.NS", "ONGC.NS", "EICHERMOT.NS", "TATAMOTORS.NS", "DIVISLAB.NS", "HDFCLIFE.NS", "COALINDIA.NS", "JSWSTEEL.NS", "HEROMOTOCO.NS", "BPCL.NS", "DRREDDY.NS", "ADANIPORTS.NS", "HINDALCO.NS", "UPL.NS", "SHREECEM.NS", "BAJAJ-AUTO.NS", "TATACONSUM.NS"],
-    "Nifty Next 50": ["BERGEPAINT.NS", "CHOLAFIN.NS", "DABUR.NS", "GODREJCP.NS", "HAVELLS.NS", "ICICIPRULI.NS", "INDIGO.NS", "JINDALSTEL.NS", "LICI.NS", "LODHA.NS", "MCDOWELL-N.NS", "MOTHERSON.NS", "NAUKRI.NS", "PIDILITIND.NS", "POLYCAB.NS", "SAMMAANCAP.NS", "SIEMENS.NS", "SRF.NS", "TORNTPHARM.NS", "TVSMOTOR.NS", "ABB.NS", "ACC.NS", "AMBUJACEM.NS", "AUROPHARMA.NS", "BANDHANBNK.NS", "BANKBARODA.NS", "BEL.NS", "BHEL.NS", "CANBK.NS", "COLPAL.NS", "CONCOR.NS", "CUMMINSIND.NS", "DMART.NS", "GAIL.NS", "GODREJPROP.NS", "HAL.NS", "HINDPETRO.NS", "IDBI.NS", "IDFCFIRSTB.NS", "INDUSTOWER.NS", "IOB.NS", "IRCTC.NS", "JUBLFOOD.NS", "L&TFH.NS", "LUPIN.NS", "MARICO.NS", "MUTHOOTFIN.NS", "NMDC.NS", "OBEROIRLTY.NS", "PFC.NS"],
-    "Nifty Midcap 100": ["ABBOTINDIA.NS", "ALKEM.NS", "APLAPOLLO.NS", "ASTRAL.NS", "ATUL.NS", "BATAINDIA.NS", "BHARATFORG.NS", "BIKAJI.NS", "BLUESTARCO.NS", "BSOFT.NS", "CGPOWER.NS", "CHAMBLFERT.NS", "COFORGE.NS", "COROMANDEL.NS", "CREDITACC.NS", "CROMPTON.NS", "CYIENT.NS", "DALBHARAT.NS", "DEEPAKNTR.NS", "DELHIVERY.NS", "DIXON.NS", "ESCORTS.NS", "EXIDEIND.NS", "FEDERALBNK.NS", "GLAND.NS", "GLAXO.NS", "GLENMARK.NS", "GNFC.NS", "GODREJIND.NS", "GUJGASLTD.NS", "HAPPSTMNDS.NS", "HINDCOPPER.NS", "HINDZINC.NS", "HUDCO.NS", "IIFL.NS", "INDIAMART.NS", "INDIANB.NS", "IPCALAB.NS", "JBCHEPHARM.NS", "JSL.NS", "KEI.NS", "KPITTECH.NS", "LALPATHLAB.NS", "LAURUSLABS.NS", "LINDEINDIA.NS", "LTTS.NS", "M&MFIN.NS", "MANAPPURAM.NS", "MAXHEALTH.NS", "METROBRAND.NS"],
-    "Bank Nifty": ["HDFCBANK.NS", "ICICIBANK.NS", "KOTAKBANK.NS", "AXISBANK.NS", "SBIN.NS", "INDUSINDBK.NS", "BANDHANBNK.NS", "FEDERALBNK.NS", "IDFCFIRSTB.NS", "PNB.NS", "BANKBARODA.NS", "CANBK.NS", "UNIONBANK.NS", "AUBANK.NS", "RBLBANK.NS"],
+    "Nifty 50": [
+        "RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "ICICIBANK.NS", "INFY.NS",
+        "HINDUNILVR.NS", "ITC.NS", "SBIN.NS", "BHARTIARTL.NS", "KOTAKBANK.NS",
+        "LT.NS", "AXISBANK.NS", "ASIANPAINT.NS", "MARUTI.NS", "TITAN.NS",
+        "SUNPHARMA.NS", "BAJFINANCE.NS", "WIPRO.NS", "ULTRACEMCO.NS", "NESTLEIND.NS",
+        "POWERGRID.NS", "NTPC.NS", "TATASTEEL.NS", "M&M.NS", "HCLTECH.NS",
+        "TECHM.NS", "INDUSINDBK.NS", "GRASIM.NS", "ADANIENT.NS", "CIPLA.NS",
+        "SBILIFE.NS", "BAJAJFINSV.NS", "BRITANNIA.NS", "APOLLOHOSP.NS", "ONGC.NS",
+        "EICHERMOT.NS", "TATAMOTORS.NS", "DIVISLAB.NS", "HDFCLIFE.NS", "COALINDIA.NS",
+        "JSWSTEEL.NS", "HEROMOTOCO.NS", "BPCL.NS", "DRREDDY.NS", "ADANIPORTS.NS",
+        "HINDALCO.NS", "UPL.NS", "SHREECEM.NS", "BAJAJ-AUTO.NS", "TATACONSUM.NS"
+    ],
+    "Nifty Next 50": [
+        "BERGEPAINT.NS", "CHOLAFIN.NS", "DABUR.NS", "GODREJCP.NS", "HAVELLS.NS",
+        "ICICIPRULI.NS", "INDIGO.NS", "JINDALSTEL.NS", "LICI.NS", "LODHA.NS",
+        "MCDOWELL-N.NS", "MOTHERSON.NS", "NAUKRI.NS", "PIDILITIND.NS", "POLYCAB.NS",
+        "SAMMAANCAP.NS", "SIEMENS.NS", "SRF.NS", "TORNTPHARM.NS", "TVSMOTOR.NS",
+        "ABB.NS", "ACC.NS", "AMBUJACEM.NS", "AUROPHARMA.NS", "BANDHANBNK.NS",
+        "BANKBARODA.NS", "BEL.NS", "BHEL.NS", "CANBK.NS", "COLPAL.NS",
+        "CONCOR.NS", "CUMMINSIND.NS", "DMART.NS", "GAIL.NS", "GODREJPROP.NS",
+        "HAL.NS", "HINDPETRO.NS", "IDBI.NS", "IDFCFIRSTB.NS", "INDUSTOWER.NS",
+        "IOB.NS", "IRCTC.NS", "JUBLFOOD.NS", "L&TFH.NS", "LUPIN.NS",
+        "MARICO.NS", "MUTHOOTFIN.NS", "NMDC.NS", "OBEROIRLTY.NS", "PFC.NS"
+    ],
+    "Nifty Midcap 100": [
+        "ABBOTINDIA.NS", "ALKEM.NS", "APLAPOLLO.NS", "ASTRAL.NS", "ATUL.NS",
+        "BATAINDIA.NS", "BHARATFORG.NS", "BIKAJI.NS", "BLUESTARCO.NS", "BSOFT.NS",
+        "CGPOWER.NS", "CHAMBLFERT.NS", "COFORGE.NS", "COROMANDEL.NS", "CREDITACC.NS",
+        "CROMPTON.NS", "CYIENT.NS", "DALBHARAT.NS", "DEEPAKNTR.NS", "DELHIVERY.NS",
+        "DIXON.NS", "ESCORTS.NS", "EXIDEIND.NS", "FEDERALBNK.NS", "GLAND.NS",
+        "GLAXO.NS", "GLENMARK.NS", "GNFC.NS", "GODREJIND.NS", "GUJGASLTD.NS",
+        "HAPPSTMNDS.NS", "HINDCOPPER.NS", "HINDZINC.NS", "HUDCO.NS", "IIFL.NS",
+        "INDIAMART.NS", "INDIANB.NS", "IPCALAB.NS", "JBCHEPHARM.NS", "JSL.NS",
+        "KEI.NS", "KPITTECH.NS", "LALPATHLAB.NS", "LAURUSLABS.NS", "LINDEINDIA.NS",
+        "LTTS.NS", "M&MFIN.NS", "MANAPPURAM.NS", "MAXHEALTH.NS", "METROBRAND.NS"
+    ],
+    "Bank Nifty": [
+        "HDFCBANK.NS", "ICICIBANK.NS", "KOTAKBANK.NS", "AXISBANK.NS", "SBIN.NS",
+        "INDUSINDBK.NS", "BANDHANBNK.NS", "FEDERALBNK.NS", "IDFCFIRSTB.NS", "PNB.NS",
+        "BANKBARODA.NS", "CANBK.NS", "UNIONBANK.NS", "AUBANK.NS", "RBLBANK.NS"
+    ],
+    "Nifty 200": [
+        "RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "ICICIBANK.NS", "INFY.NS",
+        "HINDUNILVR.NS", "ITC.NS", "SBIN.NS", "BHARTIARTL.NS", "KOTAKBANK.NS",
+        "LT.NS", "AXISBANK.NS", "ASIANPAINT.NS", "MARUTI.NS", "TITAN.NS",
+        "SUNPHARMA.NS", "BAJFINANCE.NS", "WIPRO.NS", "ULTRACEMCO.NS", "NESTLEIND.NS",
+        "POWERGRID.NS", "NTPC.NS", "TATASTEEL.NS", "M&M.NS", "HCLTECH.NS",
+        "TECHM.NS", "INDUSINDBK.NS", "GRASIM.NS", "ADANIENT.NS", "CIPLA.NS",
+        "SBILIFE.NS", "BAJAJFINSV.NS", "BRITANNIA.NS", "APOLLOHOSP.NS", "ONGC.NS",
+        "EICHERMOT.NS", "TATAMOTORS.NS", "DIVISLAB.NS", "HDFCLIFE.NS", "COALINDIA.NS",
+        "JSWSTEEL.NS", "HEROMOTOCO.NS", "BPCL.NS", "DRREDDY.NS", "ADANIPORTS.NS",
+        "HINDALCO.NS", "UPL.NS", "SHREECEM.NS", "BAJAJ-AUTO.NS", "TATACONSUM.NS",
+        "ABB.NS", "ACC.NS", "AMBUJACEM.NS", "ASHOKLEY.NS", "AUBANK.NS",
+        "AUROPHARMA.NS", "BAJAJHLDNG.NS", "BANDHANBNK.NS", "BANKBARODA.NS", "BATAINDIA.NS",
+        "BEL.NS", "BERGEPAINT.NS", "BHEL.NS", "BOSCHLTD.NS", "CANBK.NS",
+        "CHOLAFIN.NS", "COLPAL.NS", "CONCOR.NS", "CUMMINSIND.NS", "DABUR.NS",
+        "DLF.NS", "GAIL.NS", "GODREJCP.NS", "GODREJPROP.NS", "HAL.NS",
+        "HAVELLS.NS", "HINDPETRO.NS", "ICICIGI.NS", "ICICIPRULI.NS", "IDBI.NS",
+        "IDFCFIRSTB.NS", "INDIGO.NS", "INDUSTOWER.NS", "IOB.NS", "IRCTC.NS",
+        "JINDALSTEL.NS", "JUBLFOOD.NS", "L&TFH.NS", "LICI.NS", "LODHA.NS",
+        "LUPIN.NS", "MARICO.NS", "MCDOWELL-N.NS", "MOTHERSON.NS", "MUTHOOTFIN.NS",
+        "NAUKRI.NS", "NMDC.NS", "OBEROIRLTY.NS", "PEL.NS", "PFC.NS",
+        "PIDILITIND.NS", "PNB.NS", "POLYCAB.NS", "RBLBANK.NS", "RECLTD.NS",
+        "SAIL.NS", "SBICARD.NS", "SIEMENS.NS", "SRF.NS", "SUNTV.NS",
+        "TATACOMM.NS", "TATAPOWER.NS", "TORNTPHARM.NS", "TORNTPOWER.NS", "TRENT.NS",
+        "TVSMOTOR.NS", "UBL.NS", "UNITDSPR.NS", "UNOMINDA.NS", "VOLTAS.NS",
+        "ZOMATO.NS", "ZYDUSLIFE.NS", "AARTIIND.NS", "ABCAPITAL.NS", "ABFRL.NS",
+        "ADANIGREEN.NS", "ADANIPOWER.NS", "AJANTPHARM.NS", "ALKEM.NS", "ALKYLAMINE.NS",
+        "AMARAJABAT.NS", "ANURAS.NS", "APLAPOLLO.NS", "APLLTD.NS", "ASTRAL.NS",
+        "ASTRAZEN.NS", "ATGL.NS", "ATUL.NS", "BAJAJELEC.NS", "BALKRISIND.NS",
+        "BALRAMCHIN.NS", "BAYERCROP.NS", "BDL.NS", "BEML.NS", "BIKAJI.NS",
+        "BLUEDART.NS", "BLUESTARCO.NS", "BRIGADE.NS", "BSOFT.NS", "CANFINHOME.NS",
+        "CARBORUNIV.NS", "CASTROLIND.NS", "CEATLTD.NS", "CENTRALBK.NS", "CENTURYTEX.NS",
+        "CESC.NS", "CGPOWER.NS", "CHAMBLFERT.NS", "CHOLAHLDNG.NS", "CLEAN.NS",
+        "COCHINSHIP.NS", "COFORGE.NS", "COROMANDEL.NS", "CREDITACC.NS", "CROMPTON.NS",
+        "CSBBANK.NS", "CUB.NS", "CYIENT.NS", "DALBHARAT.NS", "DCBBANK.NS",
+        "DEEPAKFERT.NS", "DEEPAKNTR.NS", "DELHIVERY.NS", "DIXON.NS", "EIDPARRY.NS",
+        "EMAMILTD.NS", "ENDURANCE.NS", "ESCORTS.NS", "EXIDEIND.NS", "FEDERALBNK.NS",
+        "FORTIS.NS", "FSL.NS", "GLAND.NS", "GLAXO.NS", "GLENMARK.NS",
+        "GMRINFRA.NS", "GNFC.NS", "GODREJAGRO.NS", "GODREJIND.NS", "GRANULES.NS",
+        "GRAPHITE.NS", "GRINDWELL.NS", "GSPL.NS", "GUJGASLTD.NS", "HAPPSTMNDS.NS",
+        "HATHWAY.NS", "HINDCOPPER.NS", "HINDZINC.NS", "HUDCO.NS", "IBULHSGFIN.NS",
+        "IDFC.NS", "IEX.NS", "IGL.NS", "IIFL.NS", "INDHOTEL.NS",
+        "INDIAMART.NS", "INDIANB.NS", "INDOCO.NS", "INFIBEAM.NS", "INTELLECT.NS",
+        "IPCALAB.NS", "IRB.NS", "ISEC.NS", "ITI.NS", "J&KBANK.NS",
+        "JBCHEPHARM.NS", "JINDALSAW.NS", "JISLJALEQS.NS", "JKCEMENT.NS", "JKLAKSHMI.NS",
+        "JKTYRE.NS", "JMFINANCIL.NS", "JSL.NS", "JUBLINGREA.NS", "JUSTDIAL.NS",
+        "KAJARIACER.NS", "KALPATPOWR.NS", "KANSAINER.NS", "KARURVYSYA.NS", "KEC.NS",
+        "KEI.NS", "KNRCON.NS", "KPITTECH.NS", "KPRMILL.NS", "KRBL.NS",
+        "KSB.NS", "LALPATHLAB.NS", "LAURUSLABS.NS", "LEMONTREE.NS", "LICHSGFIN.NS",
+        "LINDEINDIA.NS", "LTTS.NS", "M&MFIN.NS", "MAHABANK.NS", "MAHINDCIE.NS",
+        "MAHLIFE.NS", "MANAPPURAM.NS", "MASTEK.NS", "MAXHEALTH.NS", "MAZDOCK.NS",
+        "METROBRAND.NS", "MFSL.NS", "MGL.NS", "MIDHANI.NS", "MINDACORP.NS",
+        "MINDTREE.NS", "MMTC.NS", "MOIL.NS", "MOTILALOFS.NS", "MPHASIS.NS",
+        "MRF.NS", "NATCOPHARM.NS", "NATIONALUM.NS", "NAVINFLUOR.NS", "NBCC.NS",
+        "NCC.NS", "NESCO.NS", "NETWORK18.NS", "NH.NS", "NHPC.NS",
+        "NIACL.NS", "NLCINDIA.NS", "NOCIL.NS", "OIL.NS", "ORIENTCEM.NS",
+        "ORIENTELEC.NS", "ORIENTPPR.NS", "PAGEIND.NS", "PERSISTENT.NS", "PETRONET.NS",
+        "PFIZER.NS", "PGHL.NS", "PGHH.NS", "PHOENIXLTD.NS", "PIIND.NS",
+        "PNBHOUSING.NS", "POLYMED.NS", "POONAWALLA.NS", "PRAJIND.NS", "PRESTIGE.NS",
+        "PRINCEPIPE.NS", "PRIVISCL.NS", "PSB.NS", "PSPPROJECT.NS", "PTC.NS",
+        "PVRINOX.NS", "QUESS.NS", "RAILTEL.NS", "RAIN.NS", "RAJESHEXPO.NS",
+        "RALLIS.NS", "RAMCOCEM.NS", "RATNAMANI.NS", "RAYMOND.NS", "RCF.NS",
+        "REDINGTON.NS", "RELAXO.NS", "RENUKA.NS", "ROSSARI.NS", "RTNPOWER.NS",
+        "RVNL.NS", "SAGCEM.NS", "SAKSOFT.NS", "SANDHAR.NS", "SANOFI.NS",
+        "SARDAEN.NS", "SCHAEFFLER.NS", "SCHNEIDER.NS", "SCI.NS", "SEQUENT.NS",
+        "SHILPAMED.NS", "SHOPERSTOP.NS", "SHRIRAMFIN.NS", "SIS.NS", "SJVN.NS",
+        "SKFINDIA.NS", "SOBHA.NS", "SOLARINDS.NS", "SONACOMS.NS", "SPANDANA.NS",
+        "SPLPETRO.NS", "STAR.NS", "STARCEMENT.NS", "STLTECH.NS", "SUBROS.NS",
+        "SUDARSCHEM.NS", "SUMICHEM.NS", "SUNDRMFAST.NS", "SUNTECK.NS", "SUPRAJIT.NS",
+        "SUPREMEIND.NS", "SUVENPHAR.NS", "SWANENERGY.NS", "SWARAJENG.NS", "SYMPHONY.NS",
+        "SYNGENE.NS", "TATACHEM.NS", "TATAELXSI.NS", "TEAMLEASE.NS", "TEJASNET.NS",
+        "THERMAX.NS", "TIMKEN.NS", "TRIDENT.NS", "TRITURBINE.NS", "TTKPRESTIG.NS",
+        "TV18BRDCST.NS", "UCOBANK.NS", "UJJIVANSFB.NS", "UNIONBANK.NS", "UTIAMC.NS",
+        "VAKRANGEE.NS", "VARROC.NS", "VEDL.NS", "VENKEYS.NS", "VGUARD.NS",
+        "VIJAYA.NS", "VINATIORGA.NS", "VIPIND.NS", "VRLLOG.NS", "VSTIND.NS",
+        "WABAG.NS", "WELCORP.NS", "WELSPUNIND.NS", "WESTLIFE.NS", "WHIRLPOOL.NS",
+        "WOCKPHARMA.NS", "WONDERLA.NS", "YESBANK.NS", "ZEEL.NS", "ZENSARTECH.NS",
+        "ZYDUSWELL.NS"
+    ],
     "Custom": []
 }
 
@@ -638,18 +702,17 @@ else:
 st.sidebar.subheader("ORB Settings")
 orb_minutes = st.sidebar.slider("Opening Range (minutes)", 5, 30, 15)
 
+st.sidebar.subheader("Gap + Spike Filter")
+st.sidebar.markdown("Skip stocks with 2% gap + 1.5% first 5-min move")
+gap_spike_filter = st.sidebar.checkbox("Enable Gap+Spike Filter", value=True)
+
 st.sidebar.subheader("Accuracy Mode")
 accuracy_mode = st.sidebar.selectbox("Select Mode", ["Conservative (80%+)", "Balanced (70-80%)", "Aggressive (60-70%)"])
 min_accuracy = {"Conservative (80%+)": 80, "Balanced (70-80%)": 70, "Aggressive (60-70%)": 60}[accuracy_mode]
 
-st.sidebar.subheader("Advanced Filters")
-use_sector = st.sidebar.checkbox("Sector Strength Filter", value=True)
+st.sidebar.subheader("Optional Extras")
 use_oi = st.sidebar.checkbox("OI Buildup Analysis", value=True)
 use_news = st.sidebar.checkbox("News Sentiment", value=True)
-use_multi_tf = st.sidebar.checkbox("Multi-Timeframe", value=True)
-use_vwap = st.sidebar.checkbox("VWAP", value=True)
-use_atr_sl = st.sidebar.checkbox("Smart ATR SL", value=True)
-use_pa = st.sidebar.checkbox("Price Action", value=True)
 
 st.sidebar.subheader("Risk Management")
 risk_reward = st.sidebar.slider("Risk : Reward", 1.0, 4.0, 2.5, 0.5)
@@ -669,28 +732,22 @@ if st.sidebar.button("Clear Saved Data", use_container_width=True):
 st.sidebar.markdown("---")
 st.sidebar.info(f"""**{accuracy_mode}**
 - Min Accuracy: {min_accuracy}%
-- Nifty Independent
-- Sector Based
+- 5 Filters: ORB | Volume | VWAP | EMA20 | Gap+Spike
+- RSI Removed | Prev Day Removed
 - Expected Win Rate: {min_accuracy}-{min_accuracy+10}%""")
 
 @st.cache_data(ttl=300)
 def fetch_data(symbol, period="5d", interval="5m", data_source="Yahoo Finance", access_token=""):
     try:
-        # Use Dhan API if selected and token is provided
         if "Dhan" in data_source and access_token and access_token.strip():
             security_id = get_dhan_security_id(symbol)
             if security_id:
-                # Map interval
                 interval_map = {"1m": "1", "5m": "5", "15m": "15", "30m": "25", "60m": "60"}
                 dhan_interval = interval_map.get(interval, "5")
-
-                # Calculate from/to dates based on period
                 days_map = {"1d": 1, "5d": 5, "10d": 10, "30d": 30, "90d": 90}
                 days = days_map.get(period, 5)
-
                 from_date = (get_ist_now() - timedelta(days=days)).strftime('%Y-%m-%d %H:%M:%S')
                 to_date = get_ist_now().strftime('%Y-%m-%d %H:%M:%S')
-
                 df = fetch_dhan_intraday_data(security_id, access_token, dhan_interval, from_date, to_date)
                 if df is not None and not df.empty:
                     return df
@@ -698,8 +755,6 @@ def fetch_data(symbol, period="5d", interval="5m", data_source="Yahoo Finance", 
                     st.warning(f"Dhan API failed for {symbol}, falling back to Yahoo Finance")
             else:
                 st.warning(f"Dhan Security ID not found for {symbol}, using Yahoo Finance")
-
-        # Fallback to Yahoo Finance
         max_retries = 3
         for attempt in range(max_retries):
             try:
@@ -708,7 +763,7 @@ def fetch_data(symbol, period="5d", interval="5m", data_source="Yahoo Finance", 
                 break
             except Exception as e:
                 if "Too Many Requests" in str(e) and attempt < max_retries - 1:
-                    time.sleep(2)  # Wait longer on rate limit
+                    time.sleep(2)
                     continue
                 raise
         if df.empty:
@@ -740,18 +795,6 @@ def calculate_vwap(df):
     except:
         return None
 
-def calculate_rsi(df, period=14):
-    try:
-        df = df.copy()
-        delta = df['Close'].diff()
-        gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
-        loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
-        rs = gain / loss
-        rsi = 100 - (100 / (1 + rs))
-        return rsi.iloc[-1] if not pd.isna(rsi.iloc[-1]) else 50
-    except:
-        return 50
-
 def calculate_atr(df, period=14):
     try:
         df = df.copy()
@@ -770,41 +813,8 @@ def calculate_ema(df, period=20):
     except:
         return None
 
-def detect_price_action(df):
-    try:
-        if len(df) < 3:
-            return "NEUTRAL", 0
-        last = df.iloc[-1]
-        prev = df.iloc[-2]
-        prev2 = df.iloc[-3]
-        patterns = []
-        if prev['Close'] < prev['Open'] and last['Close'] > last['Open'] and last['Open'] < prev['Close'] and last['Close'] > prev['Open']:
-            patterns.append(("Bullish Engulfing", 2))
-        elif prev['Close'] > prev['Open'] and last['Close'] < last['Open'] and last['Open'] > prev['Close'] and last['Close'] < prev['Open']:
-            patterns.append(("Bearish Engulfing", -2))
-        if last['Close'] > last['Open'] and (last['Low'] - min(last['Open'], last['Close'])) > 2 * abs(last['Close'] - last['Open']):
-            patterns.append(("Hammer", 1))
-        if last['Close'] < last['Open'] and (max(last['Open'], last['Close']) - last['High']) > 2 * abs(last['Close'] - last['Open']):
-            patterns.append(("Shooting Star", -1))
-        if (last['Close'] > last['Open'] and prev['Close'] > prev['Open'] and prev2['Close'] > prev2['Open'] and last['Close'] > prev['Close'] > prev2['Close']):
-            patterns.append(("Three White Soldiers", 3))
-        if (last['Close'] < last['Open'] and prev['Close'] < prev['Open'] and prev2['Close'] < prev2['Open'] and last['Close'] < prev['Close'] < prev2['Close']):
-            patterns.append(("Three Black Crows", -3))
-        if not patterns:
-            return "NEUTRAL", 0
-        score = sum(p[1] for p in patterns)
-        if score >= 2:
-            return "BULLISH", score
-        elif score <= -2:
-            return "BEARISH", abs(score)
-        return "NEUTRAL", 0
-    except:
-        return "NEUTRAL", 0
-
 def analyze_orb_ultimate(symbol, sector_perf, orb_mins=15):
     df_5m = fetch_data(symbol, period="5d", interval="5m", data_source=data_source, access_token=dhan_access_token)
-    df_15m = fetch_data(symbol, period="10d", interval="15m", data_source=data_source, access_token=dhan_access_token)
-    df_daily = fetch_data(symbol, period="30d", interval="1d", data_source=data_source, access_token=dhan_access_token)
     if df_5m is None or df_5m.empty:
         return None, "No 5m data"
     if 'Date' not in df_5m.columns:
@@ -818,6 +828,26 @@ def analyze_orb_ultimate(symbol, sector_perf, orb_mins=15):
     if df_today.empty or len(df_today) < 3:
         return None, "No today's data"
     df_today = df_today.sort_values('Date')
+
+    # ============================================================
+    # GAP + SPIKE FILTER (NEW)
+    # ============================================================
+    if gap_spike_filter and len(df_today) >= 1:
+        first_candle = df_today.iloc[0]
+        prev_close = df_5m[df_5m['Date'].dt.date < today]['Close'].iloc[-1] if len(df_5m[df_5m['Date'].dt.date < today]) > 0 else first_candle['Open']
+
+        gap_pct = ((first_candle['Open'] - prev_close) / prev_close) * 100
+
+        if abs(gap_pct) > 2:
+            high_move = ((first_candle['High'] - first_candle['Open']) / first_candle['Open']) * 100
+            low_move = ((first_candle['Open'] - first_candle['Low']) / first_candle['Open']) * 100
+
+            if gap_pct > 2 and high_move > 1.5:
+                return None, f"SKIP: Gap Up {gap_pct:.1f}% + Spike {high_move:.1f}%"
+
+            if gap_pct < -2 and low_move > 1.5:
+                return None, f"SKIP: Gap Down {gap_pct:.1f}% + Spike {low_move:.1f}%"
+
     candles_needed = max(1, orb_mins // 5)
     opening_range = df_today.head(candles_needed)
     if opening_range.empty:
@@ -836,21 +866,27 @@ def analyze_orb_ultimate(symbol, sector_perf, orb_mins=15):
         stop_loss = orb_high
     else:
         return None, "No ORB breakout"
-    filters_passed = 1
-    total_filters = 1
+
+    # ============================================================
+    # 5 FILTERS ONLY
+    # ============================================================
+    filters_passed = 1  # ORB Breakout already passed
+    total_filters = 5
     filter_details = []
     filter_details.append(("ORB Breakout", True, f"Price broke {base_signal}"))
-    total_filters += 1
+
+    # FILTER 2: Volume
     try:
         avg_volume = df_today['Volume'].rolling(window=5).mean().iloc[-1]
         volume_ratio = current_candle['Volume'] / avg_volume if avg_volume > 0 else 0
         volume_pass = volume_ratio >= 1.3
         if volume_pass:
             filters_passed += 1
-        filter_details.append((f"{'Pass' if volume_pass else 'Fail'} Volume", volume_pass, f"{volume_ratio:.1f}x"))
+        filter_details.append(("Volume", volume_pass, f"{volume_ratio:.1f}x"))
     except:
-        filter_details.append(("Fail Volume", False, "Error"))
-    total_filters += 1
+        filter_details.append(("Volume", False, "Error"))
+
+    # FILTER 3: VWAP
     vwap = calculate_vwap(df_today)
     if vwap:
         if base_signal == "BUY" and current_price > vwap:
@@ -861,50 +897,11 @@ def analyze_orb_ultimate(symbol, sector_perf, orb_mins=15):
             vwap_pass = True
         else:
             vwap_pass = False
-        filter_details.append((f"{'Pass' if vwap_pass else 'Fail'} VWAP", vwap_pass, f"Rs{vwap:.2f}"))
+        filter_details.append(("VWAP", vwap_pass, f"Rs{vwap:.2f}"))
     else:
-        filter_details.append(("Fail VWAP", False, "Error"))
-    total_filters += 1
-    rsi = calculate_rsi(df_today)
-    if base_signal == "BUY" and rsi < 75:
-        filters_passed += 1
-        rsi_pass = True
-    elif base_signal == "SELL" and rsi > 25:
-        filters_passed += 1
-        rsi_pass = True
-    else:
-        rsi_pass = False
-    filter_details.append((f"{'Pass' if rsi_pass else 'Fail'} RSI", rsi_pass, f"{rsi:.1f}"))
-    if df_15m is not None:
-        total_filters += 1
-        try:
-            df_15m['Date'] = pd.to_datetime(df_15m['Date'])
-            df_15m_today = df_15m[df_15m['Date'].dt.date == today]
-            if not df_15m_today.empty:
-                tf_high = df_15m_today['High'].max()
-                tf_low = df_15m_today['Low'].min()
-                if base_signal == "BUY" and current_price > tf_high * 0.995:
-                    filters_passed += 1
-                    tf_pass = True
-                elif base_signal == "SELL" and current_price < tf_low * 1.005:
-                    filters_passed += 1
-                    tf_pass = True
-                else:
-                    tf_pass = False
-                filter_details.append((f"{'Pass' if tf_pass else 'Fail'} 15m TF", tf_pass, f"H:Rs{tf_high:.0f}"))
-            else:
-                filter_details.append(("Fail 15m TF", False, "No data"))
-        except:
-            filter_details.append(("Fail 15m TF", False, "Error"))
-    total_filters += 1
-    pa_signal, pa_strength = detect_price_action(df_today)
-    if (base_signal == "BUY" and pa_signal == "BULLISH") or (base_signal == "SELL" and pa_signal == "BEARISH"):
-        filters_passed += 1
-        pa_pass = True
-    else:
-        pa_pass = False
-    filter_details.append((f"{'Pass' if pa_pass else 'Fail'} Price Action", pa_pass, f"{pa_signal}"))
-    total_filters += 1
+        filter_details.append(("VWAP", False, "Error"))
+
+    # FILTER 4: EMA20
     ema20 = calculate_ema(df_5m, 20)
     if ema20:
         if base_signal == "BUY" and current_price > ema20:
@@ -915,50 +912,16 @@ def analyze_orb_ultimate(symbol, sector_perf, orb_mins=15):
             ema_pass = True
         else:
             ema_pass = False
-        filter_details.append((f"{'Pass' if ema_pass else 'Fail'} EMA20", ema_pass, f"Rs{ema20:.2f}"))
+        filter_details.append(("EMA20", ema_pass, f"Rs{ema20:.2f}"))
     else:
-        filter_details.append(("Fail EMA20", False, "Error"))
-    if df_daily is not None and len(df_daily) >= 2:
-        total_filters += 1
-        try:
-            prev_day = df_daily.iloc[-2]
-            prev_high = prev_day['High']
-            prev_low = prev_day['Low']
-            if base_signal == "BUY" and current_price > prev_high:
-                filters_passed += 1
-                prev_pass = True
-                prev_detail = f"Above Rs{prev_high:.2f}"
-            elif base_signal == "SELL" and current_price < prev_low:
-                filters_passed += 1
-                prev_pass = True
-                prev_detail = f"Below Rs{prev_low:.2f}"
-            else:
-                prev_pass = False
-                prev_detail = f"H:Rs{prev_high:.0f} L:Rs{prev_low:.0f}"
-            filter_details.append((f"{'Pass' if prev_pass else 'Fail'} Prev Day", prev_pass, prev_detail))
-        except:
-            filter_details.append(("Fail Prev Day", False, "Error"))
-    sector = STOCK_TO_SECTOR.get(symbol, None)
-    if sector and sector_perf and sector in sector_perf:
-        total_filters += 1
-        sector_data = sector_perf[sector]
-        sector_trend = sector_data['trend']
-        sector_change = sector_data['change']
-        if base_signal == "BUY":
-            if sector_trend in ["STRONG_UP", "UP"]:
-                filters_passed += 1
-                sector_pass = True
-            else:
-                sector_pass = False
-        else:
-            if sector_trend in ["STRONG_DOWN", "DOWN"]:
-                filters_passed += 1
-                sector_pass = True
-            else:
-                sector_pass = False
-        filter_details.append((f"{'Pass' if sector_pass else 'Fail'} Sector ({sector})", sector_pass, f"{sector_change:+.2f}%"))
+        filter_details.append(("EMA20", False, "Error"))
+
+    # FILTER 5: Gap+Spike (already checked above, just record result)
+    if gap_spike_filter:
+        filter_details.append(("Gap+Spike", True, "Passed"))
     else:
-        filter_details.append(("Sector", False, "N/A"))
+        filter_details.append(("Gap+Spike", True, "Disabled"))
+
     accuracy = (filters_passed / total_filters) * 100 if total_filters > 0 else 0
     atr = calculate_atr(df_today)
     if atr > 0:
@@ -970,6 +933,7 @@ def analyze_orb_ultimate(symbol, sector_perf, orb_mins=15):
             stop_loss = min(stop_loss, atr_sl)
     risk = abs(entry_price - stop_loss)
     target = entry_price + (risk * risk_reward) if base_signal == "BUY" else entry_price - (risk * risk_reward)
+
     return {
         'symbol': symbol.replace('.NS', ''),
         'current_price': round(current_price, 2),
@@ -985,11 +949,9 @@ def analyze_orb_ultimate(symbol, sector_perf, orb_mins=15):
         'filters_passed': filters_passed,
         'total_filters': total_filters,
         'filter_details': filter_details,
-        'sector': sector,
-        'sector_change': sector_perf.get(sector, {}).get('change', 0) if sector_perf else 0,
+        'sector': STOCK_TO_SECTOR.get(symbol, None),
         'day_high': round(df_today['High'].max(), 2),
         'day_low': round(df_today['Low'].min(), 2),
-        'rsi': round(rsi, 1),
         'vwap': round(vwap, 2) if vwap else None,
         'atr': round(atr, 2),
         'ema20': round(ema20, 2) if ema20 else None,
@@ -1088,13 +1050,11 @@ def display_results(results, sector_perf):
             st.markdown(f'<div class="signal-card {card_class}"><h2>{sig}</h2></div>', unsafe_allow_html=True)
             st.markdown(f'<div class="accuracy-badge {acc_class}">{acc}% ({row["filters_passed"]}/{row["total_filters"]})</div>', unsafe_allow_html=True)
             if row.get('sector'):
-                st.markdown(f'<div class="filter-box"><b>Sector: {row["sector"]}</b> | Change: {row.get("sector_change", 0):+.2f}%</div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="filter-box"><b>Sector: {row["sector"]}</b></div>', unsafe_allow_html=True)
             if row.get('news_impact') and row['news_impact'] != "NO DATA":
                 news_sentiment = "POSITIVE" if row['news_impact'] == "SUPPORTS" else ("NEGATIVE" if row['news_impact'] == "CONTRADICTS" else "NEUTRAL")
                 news_class = "news-positive" if news_sentiment == "POSITIVE" else ("news-negative" if news_sentiment == "NEGATIVE" else "news-neutral")
                 st.markdown(f'<div class="{news_class}"><b>News Impact: {row["news_impact"]}</b></div>', unsafe_allow_html=True)
-
-                # Show actual news articles if available
                 if row.get('news_data') and row['news_data'].get('articles'):
                     with st.expander("📰 View News Details"):
                         for article in row['news_data']['articles'][:3]:
@@ -1106,16 +1066,16 @@ def display_results(results, sector_perf):
             with col1:
                 st.markdown(f'<div class="filter-box"><b>Trade</b><br>Entry: <b>Rs{row["entry_price"]}</b><br>SL: <span style="color:red">Rs{row["stop_loss"]}</span><br>Target: <span style="color:green">Rs{row["target"]}</span><br>Risk: Rs{row["risk"]} ({row["risk_percent"]}%)<br>R:R = 1:{risk_reward}</div>', unsafe_allow_html=True)
             with col2:
-                st.markdown(f'<div class="filter-box"><b>Tech</b><br>RSI: {row.get("rsi", "N/A")}<br>VWAP: Rs{row["vwap"] if row.get("vwap") else "N/A"}<br>ATR: Rs{row.get("atr", "N/A")}<br>EMA20: Rs{row["ema20"] if row.get("ema20") else "N/A"}</div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="filter-box"><b>Tech</b><br>VWAP: Rs{row["vwap"] if row.get("vwap") else "N/A"}<br>ATR: Rs{row.get("atr", "N/A")}<br>EMA20: Rs{row["ema20"] if row.get("ema20") else "N/A"}</div>', unsafe_allow_html=True)
             with col3:
                 if row.get('oi_signal') and row['oi_signal'] != "NEUTRAL":
                     st.markdown(f'<div class="filter-box"><b>OI</b><br>{row.get("oi_buildup", "N/A")}<br>Signal: {row["oi_signal"]}</div>', unsafe_allow_html=True)
             st.markdown("---")
-            st.markdown("**Filters:**")
-            cols = st.columns(4)
+            st.markdown("**5 Filters:**")
+            cols = st.columns(5)
             filter_details = row.get('filter_details', [])
             for i, item in enumerate(filter_details):
-                with cols[i % 4]:
+                with cols[i % 5]:
                     if isinstance(item, list) and len(item) >= 3:
                         filter_name, passed, detail = item[0], item[1], item[2]
                     elif isinstance(item, tuple) and len(item) >= 3:
@@ -1125,7 +1085,6 @@ def display_results(results, sector_perf):
                     color = "green" if passed else "red"
                     st.markdown(f'<p style="color:{color}; font-weight:bold;">{filter_name}</p><small>{detail}</small>', unsafe_allow_html=True)
     st.markdown("---")
-    # Add news summary for export
     export_results = []
     for r in results:
         er = {k: v for k, v in r.items() if k not in ['oi_data', 'news_data', 'filter_details']}
@@ -1161,8 +1120,8 @@ if not refresh and saved_data and saved_data['results']:
     display_results(saved_data['results'], saved_data['sector_perf'])
 
 elif refresh:
-    st.subheader("Scanning (Nifty Independent)...")
-    sector_perf = get_sector_performance() if use_sector else {}
+    st.subheader("Scanning (5-Filter ORB System)...")
+    sector_perf = get_sector_performance()
     if sector_perf:
         st.markdown("### Sector Performance Today")
         sector_cols = st.columns(4)
@@ -1184,7 +1143,6 @@ elif refresh:
     results = []
     total_stocks = len(stock_list)
     for i, symbol in enumerate(stock_list):
-        # Small delay to avoid rate limiting
         time.sleep(0.3)
         progress = (i + 1) / total_stocks
         progress_bar.progress(min(progress, 0.99))
@@ -1207,7 +1165,7 @@ elif refresh:
                     results.append(result)
     progress_bar.empty()
     status_text.empty()
-    settings = {'accuracy_mode': accuracy_mode, 'min_accuracy': min_accuracy, 'orb_minutes': orb_minutes, 'risk_reward': risk_reward, 'min_price': min_price, 'max_price': max_price, 'use_sector': use_sector, 'use_oi': use_oi, 'use_news': use_news}
+    settings = {'accuracy_mode': accuracy_mode, 'min_accuracy': min_accuracy, 'orb_minutes': orb_minutes, 'risk_reward': risk_reward, 'min_price': min_price, 'max_price': max_price, 'use_oi': use_oi, 'use_news': use_news}
     if results:
         save_scan_data(results, sector_perf, stock_list, settings)
         st.success(f"Scan complete! {len(results)} signals found. Data saved automatically.")
@@ -1218,45 +1176,52 @@ elif refresh:
 else:
     st.info("Welcome! Click SCAN NOW in the sidebar to start scanning. Your scan results will be automatically saved even if your PC goes to sleep!")
 
-with st.expander("Why Nifty Independent?"):
+with st.expander("5-Filter System Explained"):
     st.markdown("""
-    ### Nifty Independent Kyun?
+    ### 5-Filter ORB System
 
-    **Example:**
+    **Filter 1: ORB Breakout**
+    - First 15-30 min range ke bahar nikla?
+    - Momentum confirm
+
+    **Filter 2: Volume**
+    - Breakout mein volume spike hai?
+    - 1.3x average volume minimum
+    - Fakeout avoid karne ke liye
+
+    **Filter 3: VWAP**
+    - Price VWAP ke upar (BUY) / niche (SELL)?
+    - Institutional bias confirm
+
+    **Filter 4: EMA20**
+    - Price EMA20 ke upar (BUY) / niche (SELL)?
+    - Short-term trend direction
+
+    **Filter 5: Gap + Spike Protection**
+    - 2% gap up + 1.5% first 5-min spike = SKIP
+    - 2% gap down + 1.5% first 5-min spike = SKIP
+    - FOMO trap aur panic selling avoid karne ke liye
+
+    ### Removed Filters
+    - ❌ RSI (sir dard filter)
+    - ❌ Previous Day High/Low
+    - ❌ Price Action (Engulfing, Hammer, etc.)
+    - ❌ 15m Multi-Timeframe
+    - ❌ Sector Strength (optional mein hai)
+
+    ### Signal Logic
     ```
-    Date: 15 Jan 2024
-    Nifty: +0.5% (Bullish)
-    IT Sector: -2.5% (Bearish)
-    INFY: -3% (Strong Sell Signal)
-    Result: INFY sell kiya -> Profit
-    Agar Nifty dekhke buy kiya -> Loss
+    IF 5/5 filters pass -> STRONG BUY/SELL
+    IF 4/5 filters pass -> BUY/SELL
+    IF <4/5 filters pass -> SKIP
     ```
-
-    **Sector Rotation:**
-    - Nifty UP + IT DOWN = IT stocks avoid
-    - Nifty DOWN + Pharma UP = Pharma buy
-
-    **Stock Specific:**
-    - Company news dominates
-    - Sector momentum matters
-    - Nifty just background noise
-
-    ### Sector Strength Filter
-
-    | Sector Trend | BUY Signal | SELL Signal |
-    |-------------|-----------|-------------|
-    | STRONG_UP | Pass | Fail |
-    | UP | Pass | Fail |
-    | NEUTRAL | Fail | Fail |
-    | DOWN | Fail | Pass |
-    | STRONG_DOWN | Fail | Pass |
     """)
 
 st.markdown("---")
 st.markdown("""
 <div style="text-align: center; color: gray; font-size: 12px;">
-<b>Disclaimer:</b> Educational purposes only. Not financial advice. 
-<br><b>Nifty Independent | Sector Based | Stock-Specific Analysis</b>
+<b>Disclaimer:</b> Educational purposes only. Not financial advice.
+<br><b>5-Filter ORB System | Gap+Spike Protection | Clean Setup</b>
 <br><b>Secure Login Enabled | Auto-Save Enabled</b>
 </div>
 """, unsafe_allow_html=True)
