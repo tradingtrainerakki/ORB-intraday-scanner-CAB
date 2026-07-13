@@ -538,6 +538,117 @@ def parse_oi_data(data):
         oi_signal = "NEUTRAL"
     return {'underlying': round(underlying_value, 2), 'atm_strike': atm_strike, 'total_ce_oi': total_ce_oi, 'total_pe_oi': total_pe_oi, 'pcr_oi': round(pcr_oi, 2), 'oi_buildup': oi_buildup, 'oi_signal': oi_signal}
 
+# ============================================================
+# OI SPURTS DATA FETCHING
+# ============================================================
+
+def fetch_oi_spurts_nse():
+    """Fetch OI Spurts data from NSE - top stocks with highest OI change"""
+    try:
+        session = requests.Session()
+        headers = get_nse_headers()
+
+        # First visit NSE homepage to get cookies
+        session.get('https://www.nseindia.com/', headers=headers, timeout=10)
+
+        # OI Spurts API endpoint
+        url = "https://www.nseindia.com/api/live-analysis-oi-spurts"
+
+        response = session.get(url, headers=headers, timeout=10)
+
+        if response.status_code == 200:
+            data = response.json()
+            if data and 'data' in data:
+                oi_spurts = []
+                for item in data['data']:
+                    symbol = item.get('symbol', '')
+                    oi_change = item.get('oiChange', 0)
+                    oi_change_pct = item.get('oiChangePer', 0)
+                    volume = item.get('volume', 0)
+                    price_change = item.get('priceChange', 0)
+                    price_change_pct = item.get('priceChangePer', 0)
+
+                    oi_spurts.append({
+                        'symbol': symbol,
+                        'oi_change': oi_change,
+                        'oi_change_pct': oi_change_pct,
+                        'volume': volume,
+                        'price_change': price_change,
+                        'price_change_pct': price_change_pct,
+                        'oi_spurt_score': abs(oi_change_pct) + abs(price_change_pct)  # Combined score
+                    })
+
+                # Sort by OI change percentage (descending)
+                oi_spurts.sort(key=lambda x: x['oi_change_pct'], reverse=True)
+                return oi_spurts
+
+        # Fallback: try alternative endpoint
+        url2 = "https://www.nseindia.com/api/liveEquity-derivatives"
+        response2 = session.get(url2, headers=headers, timeout=10)
+
+        if response2.status_code == 200:
+            data2 = response2.json()
+            # Process derivatives data for OI changes
+            oi_spurts = []
+            if data2 and 'data' in data2:
+                for item in data2['data']:
+                    symbol = item.get('symbol', '')
+                    oi = item.get('openInterest', 0)
+                    oi_change = item.get('changeinOpenInterest', 0)
+                    oi_change_pct = item.get('pchangeinOpenInterest', 0)
+
+                    if abs(oi_change_pct) > 5:  # Only significant changes
+                        oi_spurts.append({
+                            'symbol': symbol,
+                            'oi_change': oi_change,
+                            'oi_change_pct': oi_change_pct,
+                            'volume': item.get('totalTradedVolume', 0),
+                            'price_change': item.get('change', 0),
+                            'price_change_pct': item.get('pChange', 0),
+                            'oi_spurt_score': abs(oi_change_pct)
+                        })
+
+                oi_spurts.sort(key=lambda x: x['oi_change_pct'], reverse=True)
+                return oi_spurts
+
+        return None
+    except Exception as e:
+        st.warning(f"OI Spurts fetch error: {e}")
+        return None
+
+
+def get_oi_spurt_rank(symbol, oi_spurts_data):
+    """Get OI spurt rank for a symbol (1 = highest OI change)"""
+    if not oi_spurts_data:
+        return None, None
+
+    symbol_clean = symbol.replace('.NS', '')
+
+    for i, item in enumerate(oi_spurts_data):
+        if item['symbol'] == symbol_clean:
+            return i + 1, item  # Rank starts at 1
+
+    return None, None
+
+
+def add_oi_spurts_to_results(results, oi_spurts_data):
+    """Add OI Spurts ranking to scan results and sort by OI change % descending"""
+    if not oi_spurts_data:
+        return results
+
+    for r in results:
+        rank, oi_data = get_oi_spurt_rank(r['symbol'], oi_spurts_data)
+        r['oi_spurt_rank'] = rank if rank else 999
+        r['oi_change_pct'] = oi_data['oi_change_pct'] if oi_data else 0
+        r['oi_spurt_score'] = oi_data['oi_spurt_score'] if oi_data else 0
+
+    # Sort by OI change % descending (highest OI change first)
+    # Then by accuracy descending
+    results.sort(key=lambda x: (-x['oi_change_pct'], -x['accuracy']))
+
+    return results
+
+
 st.sidebar.header("Scanner Settings")
 
 st.sidebar.subheader("Data Source")
@@ -832,21 +943,30 @@ def analyze_orb_ultimate(symbol, sector_perf, orb_mins=15):
     # ============================================================
     # GAP + SPIKE FILTER (NEW)
     # ============================================================
+    gap_info = {"gap_pct": 0, "spike_pct": 0, "skipped": False, "reason": ""}
+
     if gap_spike_filter and len(df_today) >= 1:
         first_candle = df_today.iloc[0]
         prev_close = df_5m[df_5m['Date'].dt.date < today]['Close'].iloc[-1] if len(df_5m[df_5m['Date'].dt.date < today]) > 0 else first_candle['Open']
 
         gap_pct = ((first_candle['Open'] - prev_close) / prev_close) * 100
+        gap_info["gap_pct"] = gap_pct
 
         if abs(gap_pct) > 2:
             high_move = ((first_candle['High'] - first_candle['Open']) / first_candle['Open']) * 100
             low_move = ((first_candle['Open'] - first_candle['Low']) / first_candle['Open']) * 100
 
             if gap_pct > 2 and high_move > 1.5:
-                return None, f"SKIP: Gap Up {gap_pct:.1f}% + Spike {high_move:.1f}%"
+                gap_info["skipped"] = True
+                gap_info["spike_pct"] = high_move
+                gap_info["reason"] = f"Gap Up {gap_pct:.1f}% + Spike {high_move:.1f}%"
+                return None, f"SKIP: {gap_info['reason']}"
 
             if gap_pct < -2 and low_move > 1.5:
-                return None, f"SKIP: Gap Down {gap_pct:.1f}% + Spike {low_move:.1f}%"
+                gap_info["skipped"] = True
+                gap_info["spike_pct"] = low_move
+                gap_info["reason"] = f"Gap Down {gap_pct:.1f}% + Spike {low_move:.1f}%"
+                return None, f"SKIP: {gap_info['reason']}"
 
     candles_needed = max(1, orb_mins // 5)
     opening_range = df_today.head(candles_needed)
@@ -871,7 +991,7 @@ def analyze_orb_ultimate(symbol, sector_perf, orb_mins=15):
     # 5 FILTERS ONLY
     # ============================================================
     filters_passed = 1  # ORB Breakout already passed
-    total_filters = 5
+    total_filters = 1   # Start with ORB
     filter_details = []
     filter_details.append(("ORB Breakout", True, f"Price broke {base_signal}"))
 
@@ -882,8 +1002,10 @@ def analyze_orb_ultimate(symbol, sector_perf, orb_mins=15):
         volume_pass = volume_ratio >= 1.3
         if volume_pass:
             filters_passed += 1
+        total_filters += 1
         filter_details.append(("Volume", volume_pass, f"{volume_ratio:.1f}x"))
     except:
+        total_filters += 1
         filter_details.append(("Volume", False, "Error"))
 
     # FILTER 3: VWAP
@@ -897,8 +1019,10 @@ def analyze_orb_ultimate(symbol, sector_perf, orb_mins=15):
             vwap_pass = True
         else:
             vwap_pass = False
+        total_filters += 1
         filter_details.append(("VWAP", vwap_pass, f"Rs{vwap:.2f}"))
     else:
+        total_filters += 1
         filter_details.append(("VWAP", False, "Error"))
 
     # FILTER 4: EMA20
@@ -912,15 +1036,19 @@ def analyze_orb_ultimate(symbol, sector_perf, orb_mins=15):
             ema_pass = True
         else:
             ema_pass = False
+        total_filters += 1
         filter_details.append(("EMA20", ema_pass, f"Rs{ema20:.2f}"))
     else:
+        total_filters += 1
         filter_details.append(("EMA20", False, "Error"))
 
-    # FILTER 5: Gap+Spike (already checked above, just record result)
+    # FILTER 5: Gap+Spike
     if gap_spike_filter:
+        # Already checked above - if we reached here, it passed
+        filters_passed += 1
+        total_filters += 1
         filter_details.append(("Gap+Spike", True, "Passed"))
-    else:
-        filter_details.append(("Gap+Spike", True, "Disabled"))
+    # If disabled, don't add to total_filters at all
 
     accuracy = (filters_passed / total_filters) * 100 if total_filters > 0 else 0
     atr = calculate_atr(df_today)
@@ -986,15 +1114,17 @@ def get_final_signal(orb_signal, accuracy, oi_data, news_data):
         elif news_impact == "CONTRADICTS":
             orb_score *= 0.5
     combined = (orb_score * 0.7 + oi_score * 0.3)
+
+    # Simplified logic: Accuracy determines strength
     if accuracy >= 80:
-        if combined > 0.3:
+        if orb_signal == "BUY":
             return "STRONG BUY", combined, oi_signal, oi_buildup, news_impact
-        elif combined < -0.3:
+        elif orb_signal == "SELL":
             return "STRONG SELL", combined, oi_signal, oi_buildup, news_impact
     elif accuracy >= 60:
-        if combined > 0:
+        if orb_signal == "BUY":
             return "BUY", combined, oi_signal, oi_buildup, news_impact
-        elif combined < 0:
+        elif orb_signal == "SELL":
             return "SELL", combined, oi_signal, oi_buildup, news_impact
     return "NEUTRAL", combined, oi_signal, oi_buildup, news_impact
 
@@ -1014,6 +1144,7 @@ def display_results(results, sector_perf):
     strong_sell = len(strong_sell_list)
     sell = len(sell_list)
 
+    # Top metrics row
     col1, col2, col3, col4, col5, col6 = st.columns(6)
     with col1:
         st.markdown(f'<div class="metric-card" style="background: linear-gradient(135deg, #00b09b 0%, #96c93d 100%);"><h4>STRONG BUY</h4><h1>{strong_buy}</h1></div>', unsafe_allow_html=True)
@@ -1030,27 +1161,40 @@ def display_results(results, sector_perf):
 
     st.markdown("---")
 
-    if strong_buy_list or buy_list:
-        st.markdown("### 🟢 BUY SIGNALS")
-        st.markdown("---")
-        for row in strong_buy_list:
-            _display_signal_card(row, "STRONG BUY", "strong-buy", "acc-90")
-        for row in buy_list:
-            acc = row.get('accuracy', 0)
-            acc_class = "acc-80" if acc >= 80 else "acc-70"
-            _display_signal_card(row, "BUY", "buy", acc_class)
+    # Side-by-side BUY and SELL columns
+    buy_col, sell_col = st.columns(2)
 
-    if strong_sell_list or sell_list:
-        st.markdown("### 🔴 SELL SIGNALS")
-        st.markdown("---")
-        for row in strong_sell_list:
-            _display_signal_card(row, "STRONG SELL", "strong-sell", "acc-90")
-        for row in sell_list:
-            acc = row.get('accuracy', 0)
-            acc_class = "acc-80" if acc >= 80 else "acc-70"
-            _display_signal_card(row, "SELL", "sell", acc_class)
+    # LEFT COLUMN - BUY SIGNALS
+    with buy_col:
+        st.markdown("<div style='background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%); padding: 15px; border-radius: 15px; text-align: center; color: white; margin-bottom: 20px;'><h2>🟢 BUY SIGNALS</h2><h4>{0} Signals</h4></div>".format(strong_buy + buy), unsafe_allow_html=True)
+
+        if not strong_buy_list and not buy_list:
+            st.info("No BUY signals found")
+        else:
+            # STRONG BUY first
+            for row in strong_buy_list:
+                _display_buy_card(row, "STRONG BUY", "strong-buy")
+            # Then normal BUY
+            for row in buy_list:
+                _display_buy_card(row, "BUY", "buy")
+
+    # RIGHT COLUMN - SELL SIGNALS
+    with sell_col:
+        st.markdown("<div style='background: linear-gradient(135deg, #cb2d3e 0%, #ef473a 100%); padding: 15px; border-radius: 15px; text-align: center; color: white; margin-bottom: 20px;'><h2>🔴 SELL SIGNALS</h2><h4>{0} Signals</h4></div>".format(strong_sell + sell), unsafe_allow_html=True)
+
+        if not strong_sell_list and not sell_list:
+            st.info("No SELL signals found")
+        else:
+            # STRONG SELL first
+            for row in strong_sell_list:
+                _display_sell_card(row, "STRONG SELL", "strong-sell")
+            # Then normal SELL
+            for row in sell_list:
+                _display_sell_card(row, "SELL", "sell")
 
     st.markdown("---")
+
+    # Export
     export_results = []
     for r in results:
         er = {k: v for k, v in r.items() if k not in ['oi_data', 'news_data', 'filter_details']}
@@ -1061,6 +1205,175 @@ def display_results(results, sector_perf):
     csv = df_export.to_csv(index=False)
     st.download_button(label="Download Signals", data=csv, file_name=f"sector_scanner_{get_ist_now().strftime('%Y%m%d_%H%M')}.csv", mime="text/csv")
 
+def _display_buy_card(row, sig, card_class):
+    """Display BUY signal card"""
+    acc = row.get('accuracy', 0)
+    oi_rank = row.get('oi_spurt_rank', 999)
+    oi_change = row.get('oi_change_pct', 0)
+
+    # OI badge - show OI change % prominently
+    oi_badge = ""
+    oi_change = row.get('oi_change_pct', 0)
+    if oi_change != 0:
+        if abs(oi_change) >= 20:
+            oi_badge = f" 🔥 OI {oi_change:+.1f}%"
+        elif abs(oi_change) >= 10:
+            oi_badge = f" ⚡ OI {oi_change:+.1f}%"
+        elif abs(oi_change) >= 5:
+            oi_badge = f" 📈 OI {oi_change:+.1f}%"
+        else:
+            oi_badge = f" OI {oi_change:+.1f}%"
+
+    news_badge = ""
+    if row.get('news_impact') and row['news_impact'] != "NO DATA":
+        if row['news_impact'] == "SUPPORTS":
+            news_badge = " 🟢"
+        elif row['news_impact'] == "CONTRADICTS":
+            news_badge = " 🔴"
+        else:
+            news_badge = " 🟡"
+
+    acc_class = "acc-90" if acc >= 90 else ("acc-80" if acc >= 80 else "acc-70")
+
+    with st.expander(f"{sig} **{row.get('symbol', 'N/A')}** | Rs{row.get('current_price', 0)} | {acc}%{news_badge}{oi_badge}"):
+        st.markdown(f'<div class="signal-card {card_class}"><h3>{sig}</h3></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="accuracy-badge {acc_class}">{acc}% ({row["filters_passed"]}/{row["total_filters"]})</div>', unsafe_allow_html=True)
+
+        if row.get('sector'):
+            st.markdown(f'<div class="filter-box"><b>Sector: {row["sector"]}</b></div>', unsafe_allow_html=True)
+
+        if row.get('news_impact') and row['news_impact'] != "NO DATA":
+            news_sentiment = "POSITIVE" if row['news_impact'] == "SUPPORTS" else ("NEGATIVE" if row['news_impact'] == "CONTRADICTS" else "NEUTRAL")
+            news_class = "news-positive" if news_sentiment == "POSITIVE" else ("news-negative" if news_sentiment == "NEGATIVE" else "news-neutral")
+            st.markdown(f'<div class="{news_class}"><b>News Impact: {row["news_impact"]}</b></div>', unsafe_allow_html=True)
+            if row.get('news_data') and row['news_data'].get('articles'):
+                with st.expander("📰 View News Details"):
+                    for article in row['news_data']['articles'][:3]:
+                        sentiment_emoji = "🟢" if article.get('sentiment') == "POSITIVE" else ("🔴" if article.get('sentiment') == "NEGATIVE" else "⚪")
+                        st.markdown(f"{sentiment_emoji} **{article.get('title', 'No title')}**")
+                        st.caption(f"Source: {article.get('publisher', 'Unknown')} | Score: {article.get('score', 0)}")
+                        st.markdown("---")
+
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown(f'<div class="filter-box"><b>Trade</b><br>Entry: <b>Rs{row["entry_price"]}</b><br>SL: <span style="color:red">Rs{row["stop_loss"]}</span><br>Target: <span style="color:green">Rs{row["target"]}</span><br>Risk: Rs{row["risk"]} ({row["risk_percent"]}%)<br>R:R = 1:{risk_reward}</div>', unsafe_allow_html=True)
+        with col2:
+            st.markdown(f'<div class="filter-box"><b>Tech</b><br>VWAP: Rs{row["vwap"] if row.get("vwap") else "N/A"}<br>ATR: Rs{row.get("atr", "N/A")}<br>EMA20: Rs{row["ema20"] if row.get("ema20") else "N/A"}</div>', unsafe_allow_html=True)
+
+        if row.get('oi_signal') and row['oi_signal'] != "NEUTRAL":
+            st.markdown(f'<div class="filter-box"><b>OI Analysis</b><br>{row.get("oi_buildup", "N/A")}<br>Signal: {row["oi_signal"]}</div>', unsafe_allow_html=True)
+
+        # OI Spurts info
+        oi_change_val = row.get('oi_change_pct', 0)
+        if oi_change_val != 0:
+            oi_color = "#ff9500" if abs(oi_change_val) >= 20 else ("#ffd700" if abs(oi_change_val) >= 10 else "#888")
+            st.markdown(f"<div style='background: linear-gradient(90deg, {oi_color}20 0%, transparent 100%); padding: 8px 12px; margin: 5px 0; border-radius: 8px; border-left: 4px solid {oi_color};'><b>📈 OI Change:</b> <span style='font-size:18px; font-weight:bold;'>{oi_change_val:+.1f}%</span> | Rank: #{row.get('oi_spurt_rank', 'N/A')} | Score: {row.get('oi_spurt_score', 0):.1f}</div>", unsafe_allow_html=True)
+
+        # OI Spurts info
+        oi_change_val = row.get('oi_change_pct', 0)
+        if oi_change_val != 0:
+            oi_color = "#ff9500" if abs(oi_change_val) >= 20 else ("#ffd700" if abs(oi_change_val) >= 10 else "#888")
+            st.markdown(f"<div style='background: linear-gradient(90deg, {oi_color}20 0%, transparent 100%); padding: 8px 12px; margin: 5px 0; border-radius: 8px; border-left: 4px solid {oi_color};'><b>📈 OI Change:</b> <span style='font-size:18px; font-weight:bold;'>{oi_change_val:+.1f}%</span> | Rank: #{row.get('oi_spurt_rank', 'N/A')} | Score: {row.get('oi_spurt_score', 0):.1f}</div>", unsafe_allow_html=True)
+
+        st.markdown("---")
+        st.markdown("**📋 Filter Analysis:**")
+
+        filter_details = row.get('filter_details', [])
+        pass_count = 0
+        fail_count = 0
+
+        for item in filter_details:
+            if isinstance(item, list) and len(item) >= 3:
+                filter_name, passed, detail = item[0], item[1], item[2]
+            elif isinstance(item, tuple) and len(item) >= 3:
+                filter_name, passed, detail = item[0], item[1], item[2]
+            else:
+                continue
+
+            if passed:
+                pass_count += 1
+                st.markdown(f"<div style='background: linear-gradient(90deg, #00ff0015 0%, transparent 100%); padding: 6px 12px; margin: 2px 0; border-radius: 6px; border-left: 3px solid #00ff88; font-size: 13px;'><span style='color:#00ff88; font-weight:bold;'>✅</span> <b>{filter_name}</b> <span style='color:#888; float:right;'>{detail}</span></div>", unsafe_allow_html=True)
+            else:
+                fail_count += 1
+                st.markdown(f"<div style='background: linear-gradient(90deg, #ff000015 0%, transparent 100%); padding: 6px 12px; margin: 2px 0; border-radius: 6px; border-left: 3px solid #ff4060; font-size: 13px;'><span style='color:#ff4060; font-weight:bold;'>❌</span> <b>{filter_name}</b> <span style='color:#888; float:right;'>{detail}</span></div>", unsafe_allow_html=True)
+
+        st.markdown(f"<div style='text-align: center; padding: 8px; margin-top: 8px; background: #f0f2f6; border-radius: 8px; font-size: 13px;'><b>Summary:</b> <span style='color:#00ff88; font-weight:bold;'>{pass_count} ✓</span> | <span style='color:#ff4060; font-weight:bold;'>{fail_count} ✗</span> | <b>Accuracy: {acc}%</b></div>", unsafe_allow_html=True)
+
+def _display_sell_card(row, sig, card_class):
+    """Display SELL signal card"""
+    acc = row.get('accuracy', 0)
+    oi_rank = row.get('oi_spurt_rank', 999)
+    oi_change = row.get('oi_change_pct', 0)
+
+    # OI badge
+    oi_badge = ""
+    if oi_rank and oi_rank <= 10:
+        oi_badge = f" 🔥 OI#{oi_rank} ({oi_change:.1f}%)"
+    elif oi_rank and oi_rank <= 50:
+        oi_badge = f" ⚡ OI#{oi_rank}"
+
+    news_badge = ""
+    if row.get('news_impact') and row['news_impact'] != "NO DATA":
+        if row['news_impact'] == "SUPPORTS":
+            news_badge = " 🟢"
+        elif row['news_impact'] == "CONTRADICTS":
+            news_badge = " 🔴"
+        else:
+            news_badge = " 🟡"
+
+    acc_class = "acc-90" if acc >= 90 else ("acc-80" if acc >= 80 else "acc-70")
+
+    with st.expander(f"{sig} **{row.get('symbol', 'N/A')}** | Rs{row.get('current_price', 0)} | {acc}%{news_badge}{oi_badge}"):
+        st.markdown(f'<div class="signal-card {card_class}"><h3>{sig}</h3></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="accuracy-badge {acc_class}">{acc}% ({row["filters_passed"]}/{row["total_filters"]})</div>', unsafe_allow_html=True)
+
+        if row.get('sector'):
+            st.markdown(f'<div class="filter-box"><b>Sector: {row["sector"]}</b></div>', unsafe_allow_html=True)
+
+        if row.get('news_impact') and row['news_impact'] != "NO DATA":
+            news_sentiment = "POSITIVE" if row['news_impact'] == "SUPPORTS" else ("NEGATIVE" if row['news_impact'] == "CONTRADICTS" else "NEUTRAL")
+            news_class = "news-positive" if news_sentiment == "POSITIVE" else ("news-negative" if news_sentiment == "NEGATIVE" else "news-neutral")
+            st.markdown(f'<div class="{news_class}"><b>News Impact: {row["news_impact"]}</b></div>', unsafe_allow_html=True)
+            if row.get('news_data') and row['news_data'].get('articles'):
+                with st.expander("📰 View News Details"):
+                    for article in row['news_data']['articles'][:3]:
+                        sentiment_emoji = "🟢" if article.get('sentiment') == "POSITIVE" else ("🔴" if article.get('sentiment') == "NEGATIVE" else "⚪")
+                        st.markdown(f"{sentiment_emoji} **{article.get('title', 'No title')}**")
+                        st.caption(f"Source: {article.get('publisher', 'Unknown')} | Score: {article.get('score', 0)}")
+                        st.markdown("---")
+
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown(f'<div class="filter-box"><b>Trade</b><br>Entry: <b>Rs{row["entry_price"]}</b><br>SL: <span style="color:red">Rs{row["stop_loss"]}</span><br>Target: <span style="color:green">Rs{row["target"]}</span><br>Risk: Rs{row["risk"]} ({row["risk_percent"]}%)<br>R:R = 1:{risk_reward}</div>', unsafe_allow_html=True)
+        with col2:
+            st.markdown(f'<div class="filter-box"><b>Tech</b><br>VWAP: Rs{row["vwap"] if row.get("vwap") else "N/A"}<br>ATR: Rs{row.get("atr", "N/A")}<br>EMA20: Rs{row["ema20"] if row.get("ema20") else "N/A"}</div>', unsafe_allow_html=True)
+
+        if row.get('oi_signal') and row['oi_signal'] != "NEUTRAL":
+            st.markdown(f'<div class="filter-box"><b>OI Analysis</b><br>{row.get("oi_buildup", "N/A")}<br>Signal: {row["oi_signal"]}</div>', unsafe_allow_html=True)
+
+        st.markdown("---")
+        st.markdown("**📋 Filter Analysis:**")
+
+        filter_details = row.get('filter_details', [])
+        pass_count = 0
+        fail_count = 0
+
+        for item in filter_details:
+            if isinstance(item, list) and len(item) >= 3:
+                filter_name, passed, detail = item[0], item[1], item[2]
+            elif isinstance(item, tuple) and len(item) >= 3:
+                filter_name, passed, detail = item[0], item[1], item[2]
+            else:
+                continue
+
+            if passed:
+                pass_count += 1
+                st.markdown(f"<div style='background: linear-gradient(90deg, #00ff0015 0%, transparent 100%); padding: 6px 12px; margin: 2px 0; border-radius: 6px; border-left: 3px solid #00ff88; font-size: 13px;'><span style='color:#00ff88; font-weight:bold;'>✅</span> <b>{filter_name}</b> <span style='color:#888; float:right;'>{detail}</span></div>", unsafe_allow_html=True)
+            else:
+                fail_count += 1
+                st.markdown(f"<div style='background: linear-gradient(90deg, #ff000015 0%, transparent 100%); padding: 6px 12px; margin: 2px 0; border-radius: 6px; border-left: 3px solid #ff4060; font-size: 13px;'><span style='color:#ff4060; font-weight:bold;'>❌</span> <b>{filter_name}</b> <span style='color:#888; float:right;'>{detail}</span></div>", unsafe_allow_html=True)
+
+        st.markdown(f"<div style='text-align: center; padding: 8px; margin-top: 8px; background: #f0f2f6; border-radius: 8px; font-size: 13px;'><b>Summary:</b> <span style='color:#00ff88; font-weight:bold;'>{pass_count} ✓</span> | <span style='color:#ff4060; font-weight:bold;'>{fail_count} ✗</span> | <b>Accuracy: {acc}%</b></div>", unsafe_allow_html=True)
 def _display_signal_card(row, sig, card_class, acc_class):
     acc = row.get('accuracy', 0)
     news_badge = ""
@@ -1158,6 +1471,13 @@ elif refresh:
             with sector_cols[col_idx % 4]:
                 st.markdown(f'<div class="sector-card {sec_class}"><b>{sector}</b><br>{change:+.2f}%<br>{trend}</div>', unsafe_allow_html=True)
             col_idx += 1
+    # Fetch OI Spurts data first
+    status_text = st.empty()
+    status_text.text("Fetching OI Spurts data...")
+    oi_spurts_data = fetch_oi_spurts_nse()
+    if oi_spurts_data:
+        st.success(f"OI Spurts loaded: Top stock {oi_spurts_data[0]['symbol']} (+{oi_spurts_data[0]['oi_change_pct']:.1f}% OI)")
+
     progress_bar = st.progress(0)
     status_text = st.empty()
     results = []
@@ -1185,6 +1505,12 @@ elif refresh:
                     results.append(result)
     progress_bar.empty()
     status_text.empty()
+    # Add OI Spurts ranking and sort
+    if oi_spurts_data and results:
+        results = add_oi_spurts_to_results(results, oi_spurts_data)
+        if results:
+            st.info(f"📊 Sorted by OI: Top stock {results[0]['symbol']} with OI change {results[0].get('oi_change_pct', 0):+.1f}%")
+
     settings = {'accuracy_mode': accuracy_mode, 'min_accuracy': min_accuracy, 'orb_minutes': orb_minutes, 'risk_reward': risk_reward, 'min_price': min_price, 'max_price': max_price, 'use_oi': use_oi, 'use_news': use_news}
     if results:
         save_scan_data(results, sector_perf, stock_list, settings)
