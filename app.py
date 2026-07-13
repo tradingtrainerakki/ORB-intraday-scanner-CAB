@@ -14,6 +14,13 @@ import time
 import warnings
 warnings.filterwarnings('ignore')
 
+# Try to import nsepython for NSE data
+try:
+    from nsepython import nse_eq, nsefetch
+    NSEPYTHON_AVAILABLE = True
+except ImportError:
+    NSEPYTHON_AVAILABLE = False
+
 IST = pytz.timezone('Asia/Kolkata')
 
 def get_ist_now():
@@ -545,19 +552,51 @@ def parse_oi_data(data):
 def fetch_oi_spurts_nse(max_retries=3):
     """Fetch OI Spurts data from NSE - top stocks with highest OI change"""
 
-    # Try NSE API with retries
+    # METHOD 1: Try nsepython library (best for cloud)
+    if NSEPYTHON_AVAILABLE:
+        try:
+            st.info("📡 Trying nsepython for OI data...")
+
+            # Use nsefetch for OI spurts
+            url = "https://www.nseindia.com/api/live-analysis-oi-spurts"
+            data = nsefetch(url)
+
+            if data and 'data' in data:
+                oi_spurts = []
+                for item in data['data']:
+                    symbol = item.get('symbol', '')
+                    oi_change = item.get('oiChange', 0)
+                    oi_change_pct = item.get('oiChangePer', 0)
+                    volume = item.get('volume', 0)
+                    price_change = item.get('priceChange', 0)
+                    price_change_pct = item.get('priceChangePer', 0)
+
+                    oi_spurts.append({
+                        'symbol': symbol,
+                        'oi_change': oi_change,
+                        'oi_change_pct': oi_change_pct,
+                        'volume': volume,
+                        'price_change': price_change,
+                        'price_change_pct': price_change_pct,
+                        'oi_spurt_score': abs(oi_change_pct) + abs(price_change_pct)
+                    })
+
+                oi_spurts.sort(key=lambda x: x['oi_change_pct'], reverse=True)
+                st.success(f"✅ nsepython OI loaded! Top: {oi_spurts[0]['symbol']} (+{oi_spurts[0]['oi_change_pct']:.1f}%)")
+                return oi_spurts
+        except Exception as e:
+            st.warning(f"nsepython failed: {e}. Trying direct requests...")
+
+    # METHOD 2: Direct requests with retries
     for attempt in range(max_retries):
         try:
             session = requests.Session()
             headers = get_nse_headers()
 
-            # First visit NSE homepage to get cookies
             session.get('https://www.nseindia.com/', headers=headers, timeout=15)
-            time.sleep(1)  # Small delay for cookies
+            time.sleep(1)
 
-            # OI Spurts API endpoint
             url = "https://www.nseindia.com/api/live-analysis-oi-spurts"
-
             response = session.get(url, headers=headers, timeout=15)
 
             if response.status_code == 200:
@@ -585,32 +624,6 @@ def fetch_oi_spurts_nse(max_retries=3):
                     oi_spurts.sort(key=lambda x: x['oi_change_pct'], reverse=True)
                     return oi_spurts
 
-            # Fallback endpoint
-            url2 = "https://www.nseindia.com/api/liveEquity-derivatives"
-            response2 = session.get(url2, headers=headers, timeout=15)
-
-            if response2.status_code == 200:
-                data2 = response2.json()
-                oi_spurts = []
-                if data2 and 'data' in data2:
-                    for item in data2['data']:
-                        symbol = item.get('symbol', '')
-                        oi_change_pct = item.get('pchangeinOpenInterest', 0)
-
-                        if abs(oi_change_pct) > 5:
-                            oi_spurts.append({
-                                'symbol': symbol,
-                                'oi_change': item.get('changeinOpenInterest', 0),
-                                'oi_change_pct': oi_change_pct,
-                                'volume': item.get('totalTradedVolume', 0),
-                                'price_change': item.get('change', 0),
-                                'price_change_pct': item.get('pChange', 0),
-                                'oi_spurt_score': abs(oi_change_pct)
-                            })
-
-                    oi_spurts.sort(key=lambda x: x['oi_change_pct'], reverse=True)
-                    return oi_spurts
-
             if attempt < max_retries - 1:
                 time.sleep(2)
                 continue
@@ -620,9 +633,9 @@ def fetch_oi_spurts_nse(max_retries=3):
                 time.sleep(2)
                 continue
             else:
-                st.warning(f"NSE OI Spurts API failed after {max_retries} attempts. Using fallback...")
+                st.warning(f"Direct NSE API failed. Using fallback...")
 
-    # FALLBACK: Use Yahoo Finance options data to estimate OI
+    # FALLBACK: Yahoo Finance
     return fetch_oi_spurts_fallback()
 
 
