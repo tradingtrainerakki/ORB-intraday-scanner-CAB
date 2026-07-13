@@ -733,8 +733,8 @@ st.sidebar.markdown("---")
 st.sidebar.info(f"""**{accuracy_mode}**
 - Min Accuracy: {min_accuracy}%
 - 5 Filters: ORB | Volume | VWAP | EMA20 | Gap+Spike
-- RSI Removed | Prev Day Removed
-- Expected Win Rate: {min_accuracy}-{min_accuracy+10}%""")
+- STRONG: 80%+ | BUY: 60-79%
+- RSI Removed | Prev Day Removed""")
 
 @st.cache_data(ttl=300)
 def fetch_data(symbol, period="5d", interval="5m", data_source="Yahoo Finance", access_token=""):
@@ -986,12 +986,12 @@ def get_final_signal(orb_signal, accuracy, oi_data, news_data):
         elif news_impact == "CONTRADICTS":
             orb_score *= 0.5
     combined = (orb_score * 0.7 + oi_score * 0.3)
-    if accuracy >= 85:
-        if combined > 0.5:
+    if accuracy >= 80:
+        if combined > 0.3:
             return "STRONG BUY", combined, oi_signal, oi_buildup, news_impact
-        elif combined < -0.5:
+        elif combined < -0.3:
             return "STRONG SELL", combined, oi_signal, oi_buildup, news_impact
-    elif accuracy >= 70:
+    elif accuracy >= 60:
         if combined > 0:
             return "BUY", combined, oi_signal, oi_buildup, news_impact
         elif combined < 0:
@@ -1003,87 +1003,53 @@ def display_results(results, sector_perf):
         st.warning("No signals found.")
         st.info("Market hours: 9:15 AM - 3:30 PM IST")
         return
-    strong_buy = len([r for r in results if r.get('final_signal') and "STRONG BUY" in r.get('final_signal', '')])
-    buy = len([r for r in results if r.get('final_signal') == "BUY"])
-    strong_sell = len([r for r in results if r.get('final_signal') and "STRONG SELL" in r.get('final_signal', '')])
-    sell = len([r for r in results if r.get('final_signal') == "SELL"])
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.markdown(f'<div class="metric-card"><h3>STRONG BUY</h3><h1>{strong_buy}</h1></div>', unsafe_allow_html=True)
-    with col2:
-        st.markdown(f'<div class="metric-card"><h3>BUY</h3><h1>{buy}</h1></div>', unsafe_allow_html=True)
-    with col3:
-        st.markdown(f'<div class="metric-card"><h3>SELL</h3><h1>{sell}</h1></div>', unsafe_allow_html=True)
-    with col4:
-        st.markdown(f'<div class="metric-card"><h3>STRONG SELL</h3><h1>{strong_sell}</h1></div>', unsafe_allow_html=True)
-    st.markdown("---")
-    results = sorted(results, key=lambda x: x['accuracy'], reverse=True)
-    for row in results:
-        sig = row.get('final_signal', 'NEUTRAL')
-        acc = row.get('accuracy', 0)
-        if "STRONG BUY" in sig:
-            card_class = "strong-buy"
-        elif sig == "BUY":
-            card_class = "buy"
-        elif "STRONG SELL" in sig:
-            card_class = "strong-sell"
-        elif sig == "SELL":
-            card_class = "sell"
-        else:
-            card_class = "neutral"
-        if acc >= 85:
-            acc_class = "acc-90"
-        elif acc >= 75:
-            acc_class = "acc-80"
-        else:
-            acc_class = "acc-70"
-        news_badge = ""
-        if row.get('news_impact') and row['news_impact'] != "NO DATA":
-            if row['news_impact'] == "SUPPORTS":
-                news_badge = " 🟢"
-            elif row['news_impact'] == "CONTRADICTS":
-                news_badge = " 🔴"
-            else:
-                news_badge = " 🟡"
 
-        with st.expander(f"{sig} **{row.get('symbol', 'N/A')}** | Rs{row.get('current_price', 0)} | {acc}%{news_badge}"):
-            st.markdown(f'<div class="signal-card {card_class}"><h2>{sig}</h2></div>', unsafe_allow_html=True)
-            st.markdown(f'<div class="accuracy-badge {acc_class}">{acc}% ({row["filters_passed"]}/{row["total_filters"]})</div>', unsafe_allow_html=True)
-            if row.get('sector'):
-                st.markdown(f'<div class="filter-box"><b>Sector: {row["sector"]}</b></div>', unsafe_allow_html=True)
-            if row.get('news_impact') and row['news_impact'] != "NO DATA":
-                news_sentiment = "POSITIVE" if row['news_impact'] == "SUPPORTS" else ("NEGATIVE" if row['news_impact'] == "CONTRADICTS" else "NEUTRAL")
-                news_class = "news-positive" if news_sentiment == "POSITIVE" else ("news-negative" if news_sentiment == "NEGATIVE" else "news-neutral")
-                st.markdown(f'<div class="{news_class}"><b>News Impact: {row["news_impact"]}</b></div>', unsafe_allow_html=True)
-                if row.get('news_data') and row['news_data'].get('articles'):
-                    with st.expander("📰 View News Details"):
-                        for article in row['news_data']['articles'][:3]:
-                            sentiment_emoji = "🟢" if article.get('sentiment') == "POSITIVE" else ("🔴" if article.get('sentiment') == "NEGATIVE" else "⚪")
-                            st.markdown(f"{sentiment_emoji} **{article.get('title', 'No title')}**")
-                            st.caption(f"Source: {article.get('publisher', 'Unknown')} | Score: {article.get('score', 0)}")
-                            st.markdown("---")
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.markdown(f'<div class="filter-box"><b>Trade</b><br>Entry: <b>Rs{row["entry_price"]}</b><br>SL: <span style="color:red">Rs{row["stop_loss"]}</span><br>Target: <span style="color:green">Rs{row["target"]}</span><br>Risk: Rs{row["risk"]} ({row["risk_percent"]}%)<br>R:R = 1:{risk_reward}</div>', unsafe_allow_html=True)
-            with col2:
-                st.markdown(f'<div class="filter-box"><b>Tech</b><br>VWAP: Rs{row["vwap"] if row.get("vwap") else "N/A"}<br>ATR: Rs{row.get("atr", "N/A")}<br>EMA20: Rs{row["ema20"] if row.get("ema20") else "N/A"}</div>', unsafe_allow_html=True)
-            with col3:
-                if row.get('oi_signal') and row['oi_signal'] != "NEUTRAL":
-                    st.markdown(f'<div class="filter-box"><b>OI</b><br>{row.get("oi_buildup", "N/A")}<br>Signal: {row["oi_signal"]}</div>', unsafe_allow_html=True)
-            st.markdown("---")
-            st.markdown("**5 Filters:**")
-            cols = st.columns(5)
-            filter_details = row.get('filter_details', [])
-            for i, item in enumerate(filter_details):
-                with cols[i % 5]:
-                    if isinstance(item, list) and len(item) >= 3:
-                        filter_name, passed, detail = item[0], item[1], item[2]
-                    elif isinstance(item, tuple) and len(item) >= 3:
-                        filter_name, passed, detail = item[0], item[1], item[2]
-                    else:
-                        continue
-                    color = "green" if passed else "red"
-                    st.markdown(f'<p style="color:{color}; font-weight:bold;">{filter_name}</p><small>{detail}</small>', unsafe_allow_html=True)
+    strong_buy_list = [r for r in results if r.get('final_signal') and "STRONG BUY" in r.get('final_signal', '')]
+    buy_list = [r for r in results if r.get('final_signal') == "BUY"]
+    strong_sell_list = [r for r in results if r.get('final_signal') and "STRONG SELL" in r.get('final_signal', '')]
+    sell_list = [r for r in results if r.get('final_signal') == "SELL"]
+
+    strong_buy = len(strong_buy_list)
+    buy = len(buy_list)
+    strong_sell = len(strong_sell_list)
+    sell = len(sell_list)
+
+    col1, col2, col3, col4, col5, col6 = st.columns(6)
+    with col1:
+        st.markdown(f'<div class="metric-card" style="background: linear-gradient(135deg, #00b09b 0%, #96c93d 100%);"><h4>STRONG BUY</h4><h1>{strong_buy}</h1></div>', unsafe_allow_html=True)
+    with col2:
+        st.markdown(f'<div class="metric-card" style="background: linear-gradient(135deg, #56ab2f 0%, #a8e063 100%);"><h4>BUY</h4><h1>{buy}</h1></div>', unsafe_allow_html=True)
+    with col3:
+        st.markdown(f'<div class="metric-card" style="background: linear-gradient(135deg, #f7971e 0%, #ffd200 100%); color: #333;"><h4>TOTAL BUY</h4><h1>{strong_buy + buy}</h1></div>', unsafe_allow_html=True)
+    with col4:
+        st.markdown(f'<div class="metric-card" style="background: linear-gradient(135deg, #cb2d3e 0%, #ef473a 100%);"><h4>STRONG SELL</h4><h1>{strong_sell}</h1></div>', unsafe_allow_html=True)
+    with col5:
+        st.markdown(f'<div class="metric-card" style="background: linear-gradient(135deg, #eb3349 0%, #f45c43 100%);"><h4>SELL</h4><h1>{sell}</h1></div>', unsafe_allow_html=True)
+    with col6:
+        st.markdown(f'<div class="metric-card" style="background: linear-gradient(135deg, #8e2de2 0%, #4a00e0 100%);"><h4>TOTAL SELL</h4><h1>{strong_sell + sell}</h1></div>', unsafe_allow_html=True)
+
+    st.markdown("---")
+
+    if strong_buy_list or buy_list:
+        st.markdown("### 🟢 BUY SIGNALS")
+        st.markdown("---")
+        for row in strong_buy_list:
+            _display_signal_card(row, "STRONG BUY", "strong-buy", "acc-90")
+        for row in buy_list:
+            acc = row.get('accuracy', 0)
+            acc_class = "acc-80" if acc >= 80 else "acc-70"
+            _display_signal_card(row, "BUY", "buy", acc_class)
+
+    if strong_sell_list or sell_list:
+        st.markdown("### 🔴 SELL SIGNALS")
+        st.markdown("---")
+        for row in strong_sell_list:
+            _display_signal_card(row, "STRONG SELL", "strong-sell", "acc-90")
+        for row in sell_list:
+            acc = row.get('accuracy', 0)
+            acc_class = "acc-80" if acc >= 80 else "acc-70"
+            _display_signal_card(row, "SELL", "sell", acc_class)
+
     st.markdown("---")
     export_results = []
     for r in results:
@@ -1094,6 +1060,60 @@ def display_results(results, sector_perf):
     df_export = pd.DataFrame(export_results)
     csv = df_export.to_csv(index=False)
     st.download_button(label="Download Signals", data=csv, file_name=f"sector_scanner_{get_ist_now().strftime('%Y%m%d_%H%M')}.csv", mime="text/csv")
+
+def _display_signal_card(row, sig, card_class, acc_class):
+    acc = row.get('accuracy', 0)
+    news_badge = ""
+    if row.get('news_impact') and row['news_impact'] != "NO DATA":
+        if row['news_impact'] == "SUPPORTS":
+            news_badge = " 🟢"
+        elif row['news_impact'] == "CONTRADICTS":
+            news_badge = " 🔴"
+        else:
+            news_badge = " 🟡"
+    with st.expander(f"{sig} **{row.get('symbol', 'N/A')}** | Rs{row.get('current_price', 0)} | {acc}%{news_badge}"):
+        st.markdown(f'<div class="signal-card {card_class}"><h2>{sig}</h2></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="accuracy-badge {acc_class}">{acc}% ({row["filters_passed"]}/{row["total_filters"]})</div>', unsafe_allow_html=True)
+        if row.get('sector'):
+            st.markdown(f'<div class="filter-box"><b>Sector: {row["sector"]}</b></div>', unsafe_allow_html=True)
+        if row.get('news_impact') and row['news_impact'] != "NO DATA":
+            news_sentiment = "POSITIVE" if row['news_impact'] == "SUPPORTS" else ("NEGATIVE" if row['news_impact'] == "CONTRADICTS" else "NEUTRAL")
+            news_class = "news-positive" if news_sentiment == "POSITIVE" else ("news-negative" if news_sentiment == "NEGATIVE" else "news-neutral")
+            st.markdown(f'<div class="{news_class}"><b>News Impact: {row["news_impact"]}</b></div>', unsafe_allow_html=True)
+            if row.get('news_data') and row['news_data'].get('articles'):
+                with st.expander("📰 View News Details"):
+                    for article in row['news_data']['articles'][:3]:
+                        sentiment_emoji = "🟢" if article.get('sentiment') == "POSITIVE" else ("🔴" if article.get('sentiment') == "NEGATIVE" else "⚪")
+                        st.markdown(f"{sentiment_emoji} **{article.get('title', 'No title')}**")
+                        st.caption(f"Source: {article.get('publisher', 'Unknown')} | Score: {article.get('score', 0)}")
+                        st.markdown("---")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.markdown(f'<div class="filter-box"><b>Trade</b><br>Entry: <b>Rs{row["entry_price"]}</b><br>SL: <span style="color:red">Rs{row["stop_loss"]}</span><br>Target: <span style="color:green">Rs{row["target"]}</span><br>Risk: Rs{row["risk"]} ({row["risk_percent"]}%)<br>R:R = 1:{risk_reward}</div>', unsafe_allow_html=True)
+        with col2:
+            st.markdown(f'<div class="filter-box"><b>Tech</b><br>VWAP: Rs{row["vwap"] if row.get("vwap") else "N/A"}<br>ATR: Rs{row.get("atr", "N/A")}<br>EMA20: Rs{row["ema20"] if row.get("ema20") else "N/A"}</div>', unsafe_allow_html=True)
+        with col3:
+            if row.get('oi_signal') and row['oi_signal'] != "NEUTRAL":
+                st.markdown(f'<div class="filter-box"><b>OI</b><br>{row.get("oi_buildup", "N/A")}<br>Signal: {row["oi_signal"]}</div>', unsafe_allow_html=True)
+        st.markdown("---")
+        st.markdown("**📋 Filter Analysis:**")
+        filter_details = row.get('filter_details', [])
+        pass_count = 0
+        fail_count = 0
+        for item in filter_details:
+            if isinstance(item, list) and len(item) >= 3:
+                filter_name, passed, detail = item[0], item[1], item[2]
+            elif isinstance(item, tuple) and len(item) >= 3:
+                filter_name, passed, detail = item[0], item[1], item[2]
+            else:
+                continue
+            if passed:
+                pass_count += 1
+                st.markdown(f"<div style='background: linear-gradient(90deg, #00ff0015 0%, transparent 100%); padding: 8px 15px; margin: 3px 0; border-radius: 8px; border-left: 4px solid #00ff88;'><span style='color:#00ff88; font-weight:bold;'>✅ PASS</span> <b>{filter_name}</b> — <span style='color:#888;'>{detail}</span></div>", unsafe_allow_html=True)
+            else:
+                fail_count += 1
+                st.markdown(f"<div style='background: linear-gradient(90deg, #ff000015 0%, transparent 100%); padding: 8px 15px; margin: 3px 0; border-radius: 8px; border-left: 4px solid #ff4060;'><span style='color:#ff4060; font-weight:bold;'>❌ FAIL</span> <b>{filter_name}</b> — <span style='color:#888;'>{detail}</span></div>", unsafe_allow_html=True)
+        st.markdown(f"<div style='text-align: center; padding: 10px; margin-top: 10px; background: #f0f2f6; border-radius: 10px;'><b>Summary:</b> <span style='color:#00ff88;'>{pass_count} PASSED</span> | <span style='color:#ff4060;'>{fail_count} FAILED</span> | <b>Accuracy: {acc}%</b></div>", unsafe_allow_html=True)
 
 # ============================================
 # MAIN LOGIC
