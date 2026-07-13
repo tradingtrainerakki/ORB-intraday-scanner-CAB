@@ -1311,9 +1311,48 @@ def _display_buy_card(row, sig, card_class):
 
     acc_class = "acc-90" if acc >= 90 else ("acc-80" if acc >= 80 else "acc-70")
 
-    with st.expander(f"{sig} **{row.get('symbol', 'N/A')}** | Rs{row.get('current_price', 0)} | {acc}%{news_badge}{oi_badge}"):
+    # Build OI info for title
+    oi_change_val = row.get('oi_change_pct', 0)
+    oi_rank = row.get('oi_spurt_rank', 999)
+
+    # OI badge for title
+    oi_title_badge = ""
+    if oi_change_val != 0:
+        if abs(oi_change_val) >= 20:
+            oi_title_badge = f" 🔥 OI {oi_change_val:+.1f}%"
+        elif abs(oi_change_val) >= 10:
+            oi_title_badge = f" ⚡ OI {oi_change_val:+.1f}%"
+        elif abs(oi_change_val) >= 5:
+            oi_title_badge = f" 📈 OI {oi_change_val:+.1f}%"
+        elif oi_change_val != 0:
+            oi_title_badge = f" OI {oi_change_val:+.1f}%"
+
+    with st.expander(f"{sig} **{row.get('symbol', 'N/A')}** | Rs{row.get('current_price', 0)} | {acc}%{news_badge}{oi_title_badge}"):
         st.markdown(f'<div class="signal-card {card_class}"><h3>{sig}</h3></div>', unsafe_allow_html=True)
         st.markdown(f'<div class="accuracy-badge {acc_class}">{acc}% ({row["filters_passed"]}/{row["total_filters"]})</div>', unsafe_allow_html=True)
+
+        # OI Spurts info - PROMINENT display
+        if oi_change_val != 0:
+            oi_color = "#ff6b35" if abs(oi_change_val) >= 20 else ("#f9ca24" if abs(oi_change_val) >= 10 else "#6c5ce7")
+            oi_bg = "#fff5f0" if abs(oi_change_val) >= 20 else ("#fffbe6" if abs(oi_change_val) >= 10 else "#f0f0ff")
+            st.markdown(f"""
+            <div style='background: {oi_bg}; padding: 12px 15px; margin: 10px 0; border-radius: 10px; 
+                        border-left: 5px solid {oi_color}; text-align: center;'>
+                <span style='font-size: 24px; font-weight: bold; color: {oi_color};'>
+                    📈 OI Change: {oi_change_val:+.1f}%
+                </span>
+                <br><span style='color: #666; font-size: 13px;'>
+                    OI Spurts Rank: #{oi_rank} | Score: {row.get('oi_spurt_score', 0):.1f}
+                </span>
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            st.markdown("""
+            <div style='background: #f8f9fa; padding: 10px 15px; margin: 10px 0; border-radius: 10px; 
+                        border-left: 5px solid #ccc; text-align: center; color: #888;'>
+                📊 OI Data: Not Available
+            </div>
+            """, unsafe_allow_html=True)
 
         if row.get('sector'):
             st.markdown(f'<div class="filter-box"><b>Sector: {row["sector"]}</b></div>', unsafe_allow_html=True)
@@ -1339,17 +1378,9 @@ def _display_buy_card(row, sig, card_class):
         if row.get('oi_signal') and row['oi_signal'] != "NEUTRAL":
             st.markdown(f'<div class="filter-box"><b>OI Analysis</b><br>{row.get("oi_buildup", "N/A")}<br>Signal: {row["oi_signal"]}</div>', unsafe_allow_html=True)
 
-        # OI Spurts info
-        oi_change_val = row.get('oi_change_pct', 0)
-        if oi_change_val != 0:
-            oi_color = "#ff9500" if abs(oi_change_val) >= 20 else ("#ffd700" if abs(oi_change_val) >= 10 else "#888")
-            st.markdown(f"<div style='background: linear-gradient(90deg, {oi_color}20 0%, transparent 100%); padding: 8px 12px; margin: 5px 0; border-radius: 8px; border-left: 4px solid {oi_color};'><b>📈 OI Change:</b> <span style='font-size:18px; font-weight:bold;'>{oi_change_val:+.1f}%</span> | Rank: #{row.get('oi_spurt_rank', 'N/A')} | Score: {row.get('oi_spurt_score', 0):.1f}</div>", unsafe_allow_html=True)
 
-        # OI Spurts info
-        oi_change_val = row.get('oi_change_pct', 0)
-        if oi_change_val != 0:
-            oi_color = "#ff9500" if abs(oi_change_val) >= 20 else ("#ffd700" if abs(oi_change_val) >= 10 else "#888")
-            st.markdown(f"<div style='background: linear-gradient(90deg, {oi_color}20 0%, transparent 100%); padding: 8px 12px; margin: 5px 0; border-radius: 8px; border-left: 4px solid {oi_color};'><b>📈 OI Change:</b> <span style='font-size:18px; font-weight:bold;'>{oi_change_val:+.1f}%</span> | Rank: #{row.get('oi_spurt_rank', 'N/A')} | Score: {row.get('oi_spurt_score', 0):.1f}</div>", unsafe_allow_html=True)
+
+
 
         st.markdown("---")
         st.markdown("**📋 Filter Analysis:**")
@@ -1399,9 +1430,48 @@ def _display_sell_card(row, sig, card_class):
 
     acc_class = "acc-90" if acc >= 90 else ("acc-80" if acc >= 80 else "acc-70")
 
-    with st.expander(f"{sig} **{row.get('symbol', 'N/A')}** | Rs{row.get('current_price', 0)} | {acc}%{news_badge}{oi_badge}"):
+    # Build OI info for title
+    oi_change_val = row.get('oi_change_pct', 0)
+    oi_rank = row.get('oi_spurt_rank', 999)
+
+    # OI badge for title
+    oi_title_badge = ""
+    if oi_change_val != 0:
+        if abs(oi_change_val) >= 20:
+            oi_title_badge = f" 🔥 OI {oi_change_val:+.1f}%"
+        elif abs(oi_change_val) >= 10:
+            oi_title_badge = f" ⚡ OI {oi_change_val:+.1f}%"
+        elif abs(oi_change_val) >= 5:
+            oi_title_badge = f" 📈 OI {oi_change_val:+.1f}%"
+        elif oi_change_val != 0:
+            oi_title_badge = f" OI {oi_change_val:+.1f}%"
+
+    with st.expander(f"{sig} **{row.get('symbol', 'N/A')}** | Rs{row.get('current_price', 0)} | {acc}%{news_badge}{oi_title_badge}"):
         st.markdown(f'<div class="signal-card {card_class}"><h3>{sig}</h3></div>', unsafe_allow_html=True)
         st.markdown(f'<div class="accuracy-badge {acc_class}">{acc}% ({row["filters_passed"]}/{row["total_filters"]})</div>', unsafe_allow_html=True)
+
+        # OI Spurts info - PROMINENT display
+        if oi_change_val != 0:
+            oi_color = "#ff6b35" if abs(oi_change_val) >= 20 else ("#f9ca24" if abs(oi_change_val) >= 10 else "#6c5ce7")
+            oi_bg = "#fff5f0" if abs(oi_change_val) >= 20 else ("#fffbe6" if abs(oi_change_val) >= 10 else "#f0f0ff")
+            st.markdown(f"""
+            <div style='background: {oi_bg}; padding: 12px 15px; margin: 10px 0; border-radius: 10px; 
+                        border-left: 5px solid {oi_color}; text-align: center;'>
+                <span style='font-size: 24px; font-weight: bold; color: {oi_color};'>
+                    📈 OI Change: {oi_change_val:+.1f}%
+                </span>
+                <br><span style='color: #666; font-size: 13px;'>
+                    OI Spurts Rank: #{oi_rank} | Score: {row.get('oi_spurt_score', 0):.1f}
+                </span>
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            st.markdown("""
+            <div style='background: #f8f9fa; padding: 10px 15px; margin: 10px 0; border-radius: 10px; 
+                        border-left: 5px solid #ccc; text-align: center; color: #888;'>
+                📊 OI Data: Not Available
+            </div>
+            """, unsafe_allow_html=True)
 
         if row.get('sector'):
             st.markdown(f'<div class="filter-box"><b>Sector: {row["sector"]}</b></div>', unsafe_allow_html=True)
